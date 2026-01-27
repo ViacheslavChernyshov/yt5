@@ -24,15 +24,90 @@ public class YtDlpService {
             log.info("[YTDLP] Downloading yt-dlp...");
             Files.createDirectories(path.getParent());
             Files.deleteIfExists(path);
-            
+
             try (var in = java.net.URI.create(DOWNLOAD_URL).toURL().openStream()) {
                 Files.copy(in, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
-            
+
             path.toFile().setExecutable(true);
             log.info("[YTDLP] Downloaded: {}", ytDlpPath);
         } else {
             log.info("[YTDLP] Found: {}", ytDlpPath);
+        }
+    }
+
+    public java.io.File downloadVideo(String url, Path outputDir, String fileNameWithoutExt)
+            throws IOException, InterruptedException {
+        Files.createDirectories(outputDir);
+        String outputPath = outputDir.resolve(fileNameWithoutExt + ".%(ext)s").toString();
+
+        String[] command = {
+                ytDlpPath,
+                "--extractor-args", "youtube:player_client=android",
+                "--user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+                "-o", outputPath,
+                "--no-warnings",
+                url
+        };
+
+        executeCommand(command);
+
+        // Find the downloaded file
+        try (java.util.stream.Stream<Path> stream = Files.list(outputDir)) {
+            return stream
+                    .filter(file -> file.getFileName().toString().startsWith(fileNameWithoutExt))
+                    .findFirst()
+                    .map(Path::toFile)
+                    .orElseThrow(() -> new IOException("Downloaded video file not found for: " + fileNameWithoutExt));
+        }
+    }
+
+    public java.io.File downloadAudio(String url, Path outputDir, String fileNameWithoutExt)
+            throws IOException, InterruptedException {
+        Files.createDirectories(outputDir);
+        String outputPath = outputDir.resolve(fileNameWithoutExt + ".%(ext)s").toString();
+
+        String[] command = {
+                ytDlpPath,
+                "--extractor-args", "youtube:player_client=android",
+                "--user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "-x",
+                "--audio-format", "mp3",
+                "-o", outputPath,
+                "--no-warnings",
+                url
+        };
+
+        executeCommand(command);
+
+        // Find the downloaded file (expecting .mp3)
+        Path expectedFile = outputDir.resolve(fileNameWithoutExt + ".mp3");
+        if (Files.exists(expectedFile)) {
+            return expectedFile.toFile();
+        } else {
+            throw new IOException("Downloaded audio file not found: " + expectedFile);
+        }
+    }
+
+    private void executeCommand(String[] command) throws IOException, InterruptedException {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                log.debug("[YTDLP] {}", line);
+            }
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("yt-dlp command failed with exit code: " + exitCode);
         }
     }
 
