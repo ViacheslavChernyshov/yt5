@@ -35,28 +35,28 @@ public class YouTubeService {
             "(?:https?://)?(?:www\\.)?youtube\\.com/shorts/([\\w-]{11})");
 
     /**
-     * Validates if the given URL is a valid YouTube video or shorts link
+     * Проверяет, является ли URL валидной ссылкой на видео или шортс YouTube
      */
     public boolean isValidYouTubeLink(String url) {
         return isYouTubeVideoLink(url) || isYouTubeShortsLink(url);
     }
 
     /**
-     * Checks if the URL is a YouTube video link
+     * Проверяет, является ли URL ссылкой на видео YouTube
      */
     public boolean isYouTubeVideoLink(String url) {
         return YOUTUBE_VIDEO_PATTERN.matcher(url).find();
     }
 
     /**
-     * Checks if the URL is a YouTube shorts link
+     * Проверяет, является ли URL ссылкой на шортс YouTube
      */
     public boolean isYouTubeShortsLink(String url) {
         return YOUTUBE_SHORTS_PATTERN.matcher(url).find();
     }
 
     /**
-     * Extracts video ID from YouTube URL
+     * Извлекает ID видео из URL YouTube
      */
     public String extractVideoId(String url) {
         Matcher matcher = YOUTUBE_VIDEO_PATTERN.matcher(url);
@@ -73,7 +73,7 @@ public class YouTubeService {
     }
 
     /**
-     * Gets video info using yt-dlp
+     * Получает информацию о видео с помощью yt-dlp
      */
     public JsonNode getVideoInfo(String videoId) throws Exception {
         String[] command = {
@@ -97,7 +97,7 @@ public class YouTubeService {
             }
         }
 
-        // Read error stream separately to prevent warnings from interfering with JSON
+        // Чтение потока ошибок отдельно, чтобы предупреждения не мешали JSON
         StringBuilder errorOutput = new StringBuilder();
         try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
             String line;
@@ -109,13 +109,13 @@ public class YouTubeService {
         int exitCode = process.waitFor();
         if (exitCode != 0) {
             throw new RuntimeException(
-                    "yt-dlp command failed with exit code: " + exitCode + ", error: " + errorOutput.toString());
+                    "Команда yt-dlp завершилась с кодом: " + exitCode + ", ошибка: " + errorOutput.toString());
         }
 
-        // Clean up the output to extract only the JSON part
+        // Очистка вывода для извлечения только части JSON
         String outputStr = output.toString().trim();
 
-        // Find the JSON object in the output (skip any warnings at the beginning)
+        // Поиск JSON объекта в выводе (пропуск любых предупреждений в начале)
         int jsonStart = outputStr.indexOf('{');
         if (jsonStart != -1) {
             outputStr = outputStr.substring(jsonStart);
@@ -126,7 +126,7 @@ public class YouTubeService {
     }
 
     /**
-     * Creates a request record in the database
+     * Создает запись запроса в базе данных
      */
     public Request createRequest(Long userId, String userName, String messageText, Boolean isValidLink,
             String youtubeUrl, String videoId, Channel channel) {
@@ -143,12 +143,12 @@ public class YouTubeService {
     }
 
     /**
-     * Processes a YouTube URL and extracts channel information
+     * Обрабатывает URL YouTube и извлекает информацию о канале
      */
     public Channel processYouTubeUrl(String url) throws Exception {
         String videoId = extractVideoId(url);
         if (videoId == null) {
-            throw new IllegalArgumentException("Invalid YouTube URL");
+            throw new IllegalArgumentException("Невалидный URL YouTube");
         }
 
         JsonNode videoInfo = getVideoInfo(videoId);
@@ -158,14 +158,14 @@ public class YouTubeService {
         String channelUrl = videoInfo.has("channel_url") ? videoInfo.get("channel_url").asText() : null;
         String description = videoInfo.has("description") ? videoInfo.get("description").asText() : null;
 
-        // Try to get subscriber count and video count if available
+        // Попытка получить количество подписчиков и видео, если доступно
         JsonNode followerCountNode = videoInfo.get("channel_follower_count");
         JsonNode videoCountNode = videoInfo.get("channel_video_count");
 
         Long subscriberCount = followerCountNode != null ? followerCountNode.asLong() : null;
         Integer videoCount = videoCountNode != null ? videoCountNode.asInt() : null;
 
-        // Check if channel already exists in database
+        // Проверка, существует ли уже канал в базе данных
         return channelRepository.findByYoutubeChannelId(channelId)
                 .orElseGet(() -> {
                     Channel newChannel = new Channel();

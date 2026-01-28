@@ -71,9 +71,9 @@ public class TaskSchedulerService {
                 processTask(task);
             }
         } catch (Exception e) {
-            log.warn("Error processing tasks, possibly because the download_tasks table is not yet created: {}",
+            log.warn("Ошибка обработки задач, возможно таблица download_tasks еще не создана: {}",
                     e.getMessage());
-            // This can happen during startup if Flyway migrations haven't completed yet
+            // Это может произойти при запуске, если миграции Flyway еще не завершились
         }
     }
 
@@ -98,14 +98,14 @@ public class TaskSchedulerService {
                 }
             }
         } catch (Exception e) {
-            log.warn("Error resetting stuck tasks, possibly because the download_tasks table is not yet created: {}",
+            log.warn("Ошибка сброса зависших задач, возможно таблица download_tasks еще не создана: {}",
                     e.getMessage());
-            // This can happen during startup if Flyway migrations haven't completed yet
+            // Это может произойти при запуске, если миграции Flyway еще не завершились
         }
     }
 
     private void processTask(DownloadTask task) {
-        log.info("Processing task id: {} type: {}", task.getId(), task.getType());
+        log.info("Обработка задачи id: {} тип: {}", task.getId(), task.getType());
 
         task.setStatus(TaskStatus.PROCESSING);
         downloadTaskRepository.save(task);
@@ -120,15 +120,15 @@ public class TaskSchedulerService {
                     sendContent(task.getChatId(), file, task.getType().name());
                     task.setStatus(TaskStatus.COMPLETED);
 
-                    // Delete file after sending
+                    // Удаление файла после отправки
                     try {
                         file.delete();
                     } catch (Exception e) {
-                        log.error("Failed to delete file: {}", file.getAbsolutePath(), e);
+                        log.error("Не удалось удалить файл: {}", file.getAbsolutePath(), e);
                     }
                 } else {
                     task.setStatus(TaskStatus.FAILED);
-                    task.setErrorMessage("Video file not found after download");
+                    task.setErrorMessage("Видео файл не найден после скачивания");
                     sendMessage(task.getChatId(), "❌ Ошибка: видео не было скачано.");
                 }
             } else if (task.getType() == TaskType.AUDIO) {
@@ -137,15 +137,15 @@ public class TaskSchedulerService {
                     sendContent(task.getChatId(), file, task.getType().name());
                     task.setStatus(TaskStatus.COMPLETED);
 
-                    // Delete file after sending
+                    // Удаление файла после отправки
                     try {
                         file.delete();
                     } catch (Exception e) {
-                        log.error("Failed to delete file: {}", file.getAbsolutePath(), e);
+                        log.error("Не удалось удалить файл: {}", file.getAbsolutePath(), e);
                     }
                 } else {
                     task.setStatus(TaskStatus.FAILED);
-                    task.setErrorMessage("Audio file not found after download");
+                    task.setErrorMessage("Аудио файл не найден после скачивания");
                     sendMessage(task.getChatId(), "❌ Ошибка: аудио не было скачано.");
                 }
             } else if (task.getType() == TaskType.SPEECH_RECOGNITION) {
@@ -155,11 +155,11 @@ public class TaskSchedulerService {
             } else if (task.getType() == TaskType.FULL_PROCESSING_ZIP) {
                 processFullProcessingZipTask(task);
             } else {
-                throw new IllegalArgumentException("Unknown task type: " + task.getType());
+                throw new IllegalArgumentException("Неизвестный тип задачи: " + task.getType());
             }
 
         } catch (Exception e) {
-            log.error("Error processing task {}", task.getId(), e);
+            log.error("Ошибка при обработке задачи {}", task.getId(), e);
             task.setStatus(TaskStatus.FAILED);
             task.setErrorMessage(e.getMessage());
             sendMessage(task.getChatId(), "❌ Произошла ошибка при обработке запроса: " + e.getMessage());
@@ -169,22 +169,22 @@ public class TaskSchedulerService {
     }
 
     private void processSpeechRecognitionTask(DownloadTask task, String url) throws IOException, InterruptedException {
-        // Step 1: Check if we already have transcription in DB
+        // Шаг 1: Проверяем, есть ли уже транскрипция в БД
         Optional<Video> videoOpt = videoRepository.findByVideoId(task.getVideoId());
         if (videoOpt.isPresent() && videoOpt.get().getTranscriptionText() != null
                 && !videoOpt.get().getTranscriptionText().isEmpty()) {
 
-            log.info("Found cached transcription for video: {}", task.getVideoId());
+            log.info("Найдена кэшированная транскрипция для видео: {}", task.getVideoId());
             sendTranscriptionToUser(task.getChatId(), videoOpt.get().getTranscriptionText(), task.getVideoId());
             task.setStatus(TaskStatus.COMPLETED);
             return;
         }
 
-        // Step 2: If not found, perform transcription
+        // Шаг 2: Если не найдено, выполняем транскрипцию
         Video video = performTranscription(task, url);
 
         if (video != null) {
-            // Step 3: Send transcription to user
+            // Шаг 3: Отправляем транскрипцию пользователю
             sendTranscriptionToUser(task.getChatId(), video.getTranscriptionText(), task.getVideoId());
             task.setStatus(TaskStatus.COMPLETED);
         }
@@ -192,35 +192,35 @@ public class TaskSchedulerService {
 
     private void processTextNormalizationTask(DownloadTask task) throws IOException, InterruptedException {
         String url = "https://www.youtube.com/watch?v=" + task.getVideoId();
-        log.info("[TEXT_NORMALIZATION] Starting normalization for video: {}", task.getVideoId());
+        log.info("[TEXT_NORMALIZATION] Начало нормализации для видео: {}", task.getVideoId());
 
-        // Step 1: Check if we already have normalized text in DB
+        // Шаг 1: Проверяем, есть ли уже нормализованный текст в БД
         Optional<Video> videoOpt = videoRepository.findByVideoId(task.getVideoId());
 
         if (videoOpt.isPresent() && videoOpt.get().getNormalizedText() != null
                 && !videoOpt.get().getNormalizedText().isEmpty()) {
 
-            log.info("Found cached normalized text for video: {}", task.getVideoId());
+            log.info("Найден кэшированный нормализованный текст для видео: {}", task.getVideoId());
             sendNormalizedTextToUser(task.getChatId(), videoOpt.get().getNormalizedText(), task.getVideoId());
             task.setStatus(TaskStatus.COMPLETED);
             return;
         }
 
         Video video;
-        // Step 2: Check if we have transcription to normalize
+        // Шаг 2: Проверяем, есть ли транскрипция для нормализации
         if (videoOpt.isPresent() && videoOpt.get().getTranscriptionText() != null
                 && !videoOpt.get().getTranscriptionText().isEmpty()) {
             video = videoOpt.get();
         } else {
-            // Step 3: No transcription? We need to download and transcribe first!
+            // Шаг 3: Нет транскрипции? Сначала нужно скачать и транскрибировать!
             sendMessage(task.getChatId(), "⏳ Транскрипция не найдена. Начинаю процесс скачивания и распознавания...");
             video = performTranscription(task, url);
             if (video == null)
-                return; // Error happened in performTranscription
+                return; // Ошибка произошла в performTranscription
         }
 
         try {
-            // Step 4: Normalize the text using LLM
+            // Шаг 4: Нормализация текста с помощью LLM
             String transcription = video.getTranscriptionText();
             String language = video.getOriginalLanguage();
 
@@ -228,42 +228,42 @@ public class TaskSchedulerService {
 
             if (normalizedText == null || normalizedText.trim().isEmpty()) {
                 task.setStatus(TaskStatus.FAILED);
-                task.setErrorMessage("Normalization returned empty result");
+                task.setErrorMessage("Нормализация вернула пустой результат");
                 sendMessage(task.getChatId(), "❌ Ошибка: нейросеть вернула пустой результат.");
                 return;
             }
 
-            // Step 5: Save normalized text to database
+            // Шаг 5: Сохранение нормализованного текста в базу данных
             video.setNormalizedText(normalizedText);
             videoRepository.save(video);
-            log.info("[TEXT_NORMALIZATION] Saved normalized text for video: {}", task.getVideoId());
+            log.info("[TEXT_NORMALIZATION] Сохранен нормализованный текст для видео: {}", task.getVideoId());
 
-            // Step 6: Send normalized text to user
+            // Шаг 6: Отправка нормализованного текста пользователю
             sendNormalizedTextToUser(task.getChatId(), normalizedText, task.getVideoId());
 
-            // Step 7: Mark task as completed
+            // Шаг 7: Отметка задачи как выполненной
             task.setStatus(TaskStatus.COMPLETED);
-            log.info("[TEXT_NORMALIZATION] Completed normalization for video: {}", task.getVideoId());
+            log.info("[TEXT_NORMALIZATION] Нормализация завершена для видео: {}", task.getVideoId());
 
         } catch (Exception e) {
-            log.error("[TEXT_NORMALIZATION] Error normalizing text for video: {}", task.getVideoId(), e);
+            log.error("[TEXT_NORMALIZATION] Ошибка нормализации текста для видео: {}", task.getVideoId(), e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Normalization error: " + e.getMessage());
+            task.setErrorMessage("Ошибка нормализации: " + e.getMessage());
             sendMessage(task.getChatId(), "❌ Ошибка при нормализации текста: " + e.getMessage());
         }
     }
 
     /**
-     * Helper method to download audio, transcribe it, and save to DB.
-     * Returns the updated Video entity or null if failed.
+     * Вспомогательный метод для скачивания аудио, транскрипции и сохранения в БД.
+     * Возвращает обновленную сущность Video или null в случае ошибки.
      */
     private Video performTranscription(DownloadTask task, String url) throws IOException, InterruptedException {
-        // Step 1: Download audio temporarily
+        // Шаг 1: Временное скачивание аудио
         File audioFile = ytDlpService.downloadAudio(url, Paths.get("temp"), "temp_" + task.getVideoId());
 
         if (audioFile == null || !audioFile.exists()) {
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Audio file not found after download");
+            task.setErrorMessage("Аудио файл не найден после скачивания");
             sendMessage(task.getChatId(), "❌ Ошибка: не удалось скачать аудио для распознавания речи.");
             return null;
         }
@@ -271,14 +271,14 @@ public class TaskSchedulerService {
         try {
             return transcribeFile(task, audioFile);
         } finally {
-            // Step 4: Clean up temporary audio file
+            // Шаг 4: Очистка временного аудио файла
             try {
                 if (audioFile.exists()) {
                     audioFile.delete();
-                    log.debug("Deleted temporary audio file: {}", audioFile.getAbsolutePath());
+                    log.debug("Удален временный аудио файл: {}", audioFile.getAbsolutePath());
                 }
             } catch (Exception e) {
-                log.warn("Failed to delete temporary audio file: {}", audioFile.getAbsolutePath(), e);
+                log.warn("Не удалось удалить временный аудио файл: {}", audioFile.getAbsolutePath(), e);
             }
         }
     }

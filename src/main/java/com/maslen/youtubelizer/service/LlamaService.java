@@ -44,24 +44,24 @@ public class LlamaService {
     private volatile boolean serverStarting = false;
 
     private static final String NORMALIZATION_PROMPT = """
-            You are a text proofreader. Your task is to normalize and correct the input text.
+            Ты - корректор текста. Твоя задача - нормализовать и исправить входной текст.
 
-            IMPORTANT RULES:
-            1. DO NOT change the language of the text - keep it in the original language
-            2. Fix ONLY:
-               - Grammar errors
-               - Spelling errors
-               - Punctuation errors
-               - Incorrect word cases (падежи)
-               - Incorrect word agreement in sentences
-            3. Keep the text as close as possible to the original - do not rephrase or rewrite
-            4. Do not add any explanations or comments - output ONLY the corrected text
-            5. Preserve the original meaning exactly
+            ВАЖНЫЕ ПРАВИЛА:
+            1. НЕ меняй язык текста - оставляй его на исходном языке
+            2. Исправляй ТОЛЬКО:
+               - Грамматические ошибки
+               - Орфографические ошибки
+               - Ошибки пунктуации
+               - Неверные падежи слов
+               - Неверное согласование слов в предложениях
+            3. Сохраняй текст максимально близким к оригиналу - не перефразируй и не переписывай
+            4. Не добавляй никаких объяснений или комментариев - выводи ТОЛЬКО исправленный текст
+            5. Сохраняй исходный смысл в точности
 
-            Input text:
+            Входной текст:
             %s
 
-            Corrected text:
+            Исправленный текст:
             """;
 
     public void ensureAvailable() throws IOException {
@@ -70,19 +70,19 @@ public class LlamaService {
 
         // Download llama.cpp if missing
         if (Files.notExists(exePath)) {
-            log.info("[LLAMA] Downloading llama.cpp...");
+            log.info("[LLAMA] Скачивание llama.cpp...");
             DownloadHelper.downloadAndExtractZip(LLAMA_URL, exePath.getParent(), "Llama.cpp");
             exePath.toFile().setExecutable(true);
         } else {
-            log.info("[LLAMA] Found: {}", llamaPath);
+            log.info("[LLAMA] Найден: {}", llamaPath);
         }
 
         // Download model if missing
         if (Files.notExists(modelFilePath)) {
-            log.info("[LLAMA] Downloading Qwen2.5 model (this will take a few minutes)...");
-            DownloadHelper.downloadWithProgress(MODEL_URL, modelFilePath, "Qwen model");
+            log.info("[LLAMA] Скачивание модели Qwen2.5 (это займет несколько минут)...");
+            DownloadHelper.downloadWithProgress(MODEL_URL, modelFilePath, "Модель Qwen");
         } else {
-            log.info("[LLAMA] Model found: {}", modelPath);
+            log.info("[LLAMA] Модель найдена: {}", modelPath);
         }
     }
 
@@ -91,27 +91,27 @@ public class LlamaService {
      */
     public synchronized void ensureServerRunning() throws IOException, InterruptedException {
         if (isServerRunning()) {
-            log.debug("[LLAMA] Server already running on port {}", serverPort);
+            log.debug("[LLAMA] Сервер уже запущен на порту {}", serverPort);
             return;
         }
 
         if (serverStarting) {
-            log.info("[LLAMA] Server is starting, waiting...");
+            log.info("[LLAMA] Сервер запускается, ожидание...");
             waitForServer(60);
             return;
         }
 
         serverStarting = true;
         try {
-            log.info("[LLAMA] Starting llama-server on port {}...", serverPort);
+            log.info("[LLAMA] Запуск llama-server на порту {}...", serverPort);
 
             ProcessBuilder pb = new ProcessBuilder(
                     llamaPath,
                     "-m", modelPath,
                     "--port", String.valueOf(serverPort),
                     "--host", "0.0.0.0",
-                    "-c", "4096", // context size
-                    "-t", String.valueOf(threads) // CPU threads (20 by default)
+                    "-c", "4096", // размер контекста
+                    "-t", String.valueOf(threads) // Потоки CPU (20 по умолчанию)
             );
 
             pb.redirectErrorStream(true);
@@ -126,7 +126,7 @@ public class LlamaService {
                         log.debug("[LLAMA-SERVER] {}", line);
                     }
                 } catch (IOException e) {
-                    log.error("[LLAMA] Error reading server output", e);
+                    log.error("[LLAMA] Ошибка чтения вывода сервера", e);
                 }
             });
             logReader.setDaemon(true);
@@ -134,10 +134,10 @@ public class LlamaService {
 
             // Ждём пока сервер запустится
             if (!waitForServer(120)) {
-                throw new IOException("llama-server failed to start within 120 seconds");
+                throw new IOException("llama-server не смог запуститься в течение 120 секунд");
             }
 
-            log.info("[LLAMA] Server started successfully on port {}", serverPort);
+            log.info("[LLAMA] Сервер успешно запущен на порту {}", serverPort);
         } finally {
             serverStarting = false;
         }
@@ -210,7 +210,7 @@ public class LlamaService {
                 }
                 """, escapeJson(prompt));
 
-        log.info("[LLAMA] Sending normalization request for text of {} chars, language: {}",
+        log.info("[LLAMA] Отправка запроса нормализации для текста длиной {} символов, язык: {}",
                 text.length(), language);
 
         // Отправляем запрос
@@ -230,7 +230,7 @@ public class LlamaService {
         int responseCode = conn.getResponseCode();
         if (responseCode != 200) {
             String error = readStream(conn.getErrorStream());
-            throw new IOException("llama-server returned error " + responseCode + ": " + error);
+            throw new IOException("llama-server вернул ошибку " + responseCode + ": " + error);
         }
 
         String response = readStream(conn.getInputStream());
@@ -239,7 +239,7 @@ public class LlamaService {
         // Парсим ответ
         String normalizedText = extractContentFromResponse(response);
 
-        log.info("[LLAMA] Normalization completed, result: {} chars", normalizedText.length());
+        log.info("[LLAMA] Нормализация завершена, результат: {} символов", normalizedText.length());
         return normalizedText;
     }
 
@@ -281,7 +281,7 @@ public class LlamaService {
         try {
             int contentStart = response.indexOf("\"content\":");
             if (contentStart == -1) {
-                log.warn("[LLAMA] Could not find 'content' in response: {}", response);
+                log.warn("[LLAMA] Не удалось найти 'content' в ответе: {}", response);
                 return "";
             }
 
@@ -289,7 +289,7 @@ public class LlamaService {
             int contentEnd = findClosingQuote(response, contentStart);
 
             if (contentEnd == -1) {
-                log.warn("[LLAMA] Could not find closing quote in response");
+                log.warn("[LLAMA] Не удалось найти закрывающую кавычку в ответе");
                 return "";
             }
 
@@ -304,7 +304,7 @@ public class LlamaService {
 
             return content.trim();
         } catch (Exception e) {
-            log.error("[LLAMA] Error parsing response: {}", e.getMessage());
+            log.error("[LLAMA] Ошибка парсинга ответа: {}", e.getMessage());
             return "";
         }
     }
@@ -330,7 +330,7 @@ public class LlamaService {
     @PreDestroy
     public void stopServer() {
         if (serverProcess != null && serverProcess.isAlive()) {
-            log.info("[LLAMA] Stopping llama-server...");
+            log.info("[LLAMA] Остановка llama-server...");
             serverProcess.destroy();
             try {
                 if (!serverProcess.waitFor(10, TimeUnit.SECONDS)) {

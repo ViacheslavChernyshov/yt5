@@ -21,6 +21,7 @@ import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import jakarta.annotation.PostConstruct;
@@ -56,9 +57,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         try {
             botsApplication = new TelegramBotsLongPollingApplication();
             botsApplication.registerBot(botToken, this);
-            log.info("[BOT] YouTubeLizer Bot started successfully!");
+            log.info("[BOT] YouTubeLizer Bot успешно запущен!");
         } catch (TelegramApiException e) {
-            log.error("[BOT] Failed to start bot: {}", e.getMessage(), e);
+            log.error("[BOT] Не удалось запустить бота: {}", e.getMessage(), e);
         }
     }
 
@@ -67,9 +68,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         if (botsApplication != null) {
             try {
                 botsApplication.close();
-                log.info("[BOT] Bot stopped");
+                log.info("[BOT] Бот остановлен");
             } catch (Exception e) {
-                log.error("[BOT] Failed to stop bot: {}", e.getMessage(), e);
+                log.error("[BOT] Не удалось остановить бота: {}", e.getMessage(), e);
             }
         }
     }
@@ -82,7 +83,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             String userName = update.getMessage().getFrom().getFirstName();
             Long userId = update.getMessage().getFrom().getId();
 
-            log.info("[BOT] Received message from {}: {}", userName, messageText);
+            log.info("[BOT] Получено сообщение от {}: {}", userName, messageText);
 
             if (messageText.equals("/start")) {
                 sendMessage(chatId, "👋 Привет, " + userName + "!\n\n" +
@@ -90,18 +91,18 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                         "и я помогу тебе с его обработкой!\n\n" +
                         "📝 Просто отправь ссылку на видео.");
             } else if (youTubeService.isValidYouTubeLink(messageText)) {
-                // Log the request
+                // Логируем запрос
                 String videoId = youTubeService.extractVideoId(messageText);
                 Request request = youTubeService.createRequest(userId, userName, messageText, true, messageText,
                         videoId, null);
 
                 try {
-                    // Extract channel information
+                    // Извлекаем информацию о канале
                     Channel channel = youTubeService.processYouTubeUrl(messageText);
 
-                    // Update the request with channel information
+                    // Обновляем запрос информацией о канале
                     request.setChannel(channel);
-                    // Save the updated request
+                    // Сохраняем обновленный запрос
                     youTubeService.createRequest(userId, userName, messageText, true, messageText, videoId, channel);
 
                     sendMessageWithKeyboard(chatId, "🎬 Валидная YouTube ссылка найдена!\n" +
@@ -112,9 +113,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                             "Выберите действие:", videoId);
 
                 } catch (Exception e) {
-                    log.error("[BOT] Error processing YouTube link: {}", e.getMessage(), e);
+                    log.error("[BOT] Ошибка обработки ссылки YouTube: {}", e.getMessage(), e);
 
-                    // Log invalid request
+                    // Логируем невалидный запрос
                     youTubeService.createRequest(userId, userName, messageText, false, messageText, videoId, null);
 
                     sendMessage(chatId, "❌ Произошла ошибка при обработке YouTube ссылки.\n" +
@@ -143,9 +144,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 .build();
         try {
             telegramClient.execute(message);
-            log.debug("[BOT] Message sent to chat {}", chatId);
+            log.debug("[BOT] Сообщение отправлено в чат {}", chatId);
         } catch (TelegramApiException e) {
-            log.error("[BOT] Failed to send message: {}", e.getMessage(), e);
+            log.error("[BOT] Не удалось отправить сообщение: {}", e.getMessage(), e);
         }
     }
 
@@ -157,19 +158,19 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 .build();
         try {
             telegramClient.execute(message);
-            log.debug("[BOT] Message with keyboard sent to chat {}", chatId);
+            log.debug("[BOT] Сообщение с клавиатурой отправлено в чат {}", chatId);
         } catch (TelegramApiException e) {
-            log.error("[BOT] Failed to send message with keyboard: {}", e.getMessage(), e);
-            // Fallback to sending plain message
+            log.error("[BOT] Не удалось отправить сообщение с клавиатурой: {}", e.getMessage(), e);
+            // Запасной вариант: отправка обычного сообщения
             sendMessage(chatId, text);
         }
     }
 
     private InlineKeyboardMarkup createProcessingOptionsKeyboard(String videoId) {
-        // Create the keyboard using the proper structure for this library version
+        // Создаем клавиатуру, используя правильную структуру для этой версии библиотеки
         List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow> keyboard = new ArrayList<>();
 
-        // First row: Download Video and Download Audio
+        // Первый ряд: Скачать видео и Скачать аудио
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row1 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row1.add(InlineKeyboardButton.builder()
                 .text("📹 Загрузка видео")
@@ -181,7 +182,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 .build());
         keyboard.add(row1);
 
-        // Second row: Speech Recognition and Text Normalization
+        // Второй ряд: Распознавание речи и Нормализация текста
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row2 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row2.add(InlineKeyboardButton.builder()
                 .text("🗣️ Распознавание речи")
@@ -193,7 +194,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 .build());
         keyboard.add(row2);
 
-        // Third row: Process All and Package as ZIP
+        // Третий ряд: Выполнить все и запаковать в ZIP
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row3 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row3.add(InlineKeyboardButton.builder()
                 .text("📦 Выполнить все и запаковать ZIP")
@@ -212,43 +213,50 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         int messageId = callbackQuery.getMessage().getMessageId();
         String userId = callbackQuery.getFrom().getId().toString();
 
-        log.info("[BOT] Callback received: {} from user: {}", callbackData, userId);
+        log.info("[BOT] Получен callback: {} от пользователя: {}", callbackData, userId);
 
-        // Process the callback based on the data
+        // Обработка callback на основе данных
         String[] parts = callbackData.split(":");
         String action = parts[0];
         String videoId = parts.length > 1 ? parts[1] : null;
 
+        String actionName = "";
         String responseText = "";
         switch (action) {
             case "download_video":
+                actionName = "📹 Загрузка видео";
                 responseText = "📥 Задача добавлена в очередь. Ожидайте загрузки видео...";
                 queueDownloadTask(chatId, videoId, TaskType.VIDEO);
                 break;
             case "download_audio":
+                actionName = "🎧 Загрузка аудио";
                 responseText = "📥 Задача добавлена в очередь. Ожидайте загрузки аудио...";
                 queueDownloadTask(chatId, videoId, TaskType.AUDIO);
                 break;
             case "speech_recognition":
+                actionName = "🗣️ Распознавание речи";
                 responseText = "🎙️ Задача добавлена в очередь. Начинается распознавание речи...";
                 queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION);
                 break;
             case "normalize_text":
+                actionName = "📝 Нормализация текста";
                 responseText = "📝 Задача добавлена в очередь. Начинается нормализация текста...";
                 queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION);
                 break;
             case "process_all_zip":
+                actionName = "📦 Полная обработка (ZIP)";
                 responseText = "📦 Задача добавлена в очередь. Готовлю ZIP-архив со всеми материалами...";
                 queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP);
                 break;
             default:
+                actionName = "Неизвестное действие";
                 responseText = "Неизвестная команда";
         }
 
-        // Send response to user
+        // Отправка ответа пользователю
         sendMessage(chatId, responseText);
 
-        // Answer the callback query to remove the loading indicator
+        // Ответ на callback query, чтобы убрать индикатор загрузки
         try {
             telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
                     .callbackQueryId(callbackQuery.getId())
@@ -256,20 +264,21 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                     .showAlert(false)
                     .build());
         } catch (TelegramApiException e) {
-            log.error("[BOT] Failed to answer callback query: {}", e.getMessage(), e);
+            log.error("[BOT] Не удалось ответить на callback query: {}", e.getMessage(), e);
         }
 
-        // Remove the inline keyboard from the message
+        // Редактирование исходного сообщения для отображения выбора и удаления
+        // клавиатуры
         try {
-            org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup editMarkup = org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup
-                    .builder()
+            EditMessageText editMessage = EditMessageText.builder()
                     .chatId(chatId)
                     .messageId(messageId)
-                    .replyMarkup(null) // Pass null to remove the keyboard
+                    .text("✅ Выбрано: " + actionName)
+                    .replyMarkup(null) // Удаляем клавиатуру
                     .build();
-            telegramClient.execute(editMarkup);
+            telegramClient.execute(editMessage);
         } catch (TelegramApiException e) {
-            log.error("[BOT] Failed to remove inline keyboard: {}", e.getMessage(), e);
+            log.error("[BOT] Не удалось отредактировать сообщение: {}", e.getMessage(), e);
         }
     }
 
@@ -280,6 +289,6 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         task.setType(type);
         task.setStatus(TaskStatus.PENDING);
         downloadTaskRepository.save(task);
-        log.info("Queued download task: videoId={}, type={}", videoId, type);
+        log.info("Задача на скачивание добавлена в очередь: videoId={}, type={}", videoId, type);
     }
 }

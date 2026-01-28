@@ -21,7 +21,7 @@ public class YtDlpService {
     public void ensureAvailable() throws IOException {
         Path path = Paths.get(ytDlpPath);
         if (Files.notExists(path)) {
-            log.info("[YTDLP] Downloading yt-dlp...");
+            log.info("[YTDLP] Скачивание yt-dlp...");
             Files.createDirectories(path.getParent());
             Files.deleteIfExists(path);
 
@@ -30,9 +30,9 @@ public class YtDlpService {
             }
 
             path.toFile().setExecutable(true);
-            log.info("[YTDLP] Downloaded: {}", ytDlpPath);
+            log.info("[YTDLP] Скачано: {}", ytDlpPath);
         } else {
-            log.info("[YTDLP] Found: {}", ytDlpPath);
+            log.info("[YTDLP] Найден: {}", ytDlpPath);
         }
     }
 
@@ -54,13 +54,13 @@ public class YtDlpService {
 
         executeCommand(command);
 
-        // Find the downloaded file
+        // Поиск скачанного файла
         try (java.util.stream.Stream<Path> stream = Files.list(outputDir)) {
             return stream
                     .filter(file -> file.getFileName().toString().startsWith(fileNameWithoutExt))
                     .findFirst()
                     .map(Path::toFile)
-                    .orElseThrow(() -> new IOException("Downloaded video file not found for: " + fileNameWithoutExt));
+                    .orElseThrow(() -> new IOException("Скачанный видео файл не найден для: " + fileNameWithoutExt));
         }
     }
 
@@ -83,12 +83,12 @@ public class YtDlpService {
 
         executeCommand(command);
 
-        // Find the downloaded file (expecting .mp3)
+        // Поиск скачанного файла (ожидается .mp3)
         Path expectedFile = outputDir.resolve(fileNameWithoutExt + ".mp3");
         if (Files.exists(expectedFile)) {
             return expectedFile.toFile();
         } else {
-            throw new IOException("Downloaded audio file not found: " + expectedFile);
+            throw new IOException("Скачанный аудио файл не найден: " + expectedFile);
         }
     }
 
@@ -107,7 +107,7 @@ public class YtDlpService {
 
         int exitCode = process.waitFor();
         if (exitCode != 0) {
-            throw new IOException("yt-dlp command failed with exit code: " + exitCode);
+            throw new IOException("Команда yt-dlp завершилась с кодом: " + exitCode);
         }
     }
 

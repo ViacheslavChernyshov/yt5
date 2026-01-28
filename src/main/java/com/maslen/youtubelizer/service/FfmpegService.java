@@ -23,10 +23,10 @@ public class FfmpegService {
     public void ensureAvailable() throws IOException {
         Path path = Paths.get(ffmpegPath);
         if (Files.notExists(path)) {
-            log.info("[FFMPEG] Downloading FFmpeg...");
+            log.info("[FFMPEG] Скачивание FFmpeg...");
             download();
         } else {
-            log.info("[FFMPEG] Found: {}", ffmpegPath);
+            log.info("[FFMPEG] Найден: {}", ffmpegPath);
         }
     }
 
@@ -43,7 +43,7 @@ public class FfmpegService {
                 Files.copy(in, tempZip, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
 
-            log.info("[FFMPEG] Extracting...");
+            log.info("[FFMPEG] Извлечение...");
             // Извлекаем ffmpeg.exe из архива
             boolean found = false;
             try (ZipInputStream zis = new ZipInputStream(new java.io.FileInputStream(tempZip.toFile()))) {
@@ -59,11 +59,11 @@ public class FfmpegService {
             }
 
             if (!found) {
-                throw new IOException("ffmpeg.exe not found in archive");
+                throw new IOException("ffmpeg.exe не найден в архиве");
             }
 
             target.toFile().setExecutable(true);
-            log.info("[FFMPEG] Downloaded: {}", ffmpegPath);
+            log.info("[FFMPEG] Скачано: {}", ffmpegPath);
         } finally {
             Files.deleteIfExists(tempZip);
         }

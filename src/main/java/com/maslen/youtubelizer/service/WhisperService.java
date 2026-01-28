@@ -38,23 +38,23 @@ public class WhisperService {
 
         // Download binary if missing
         if (Files.notExists(exePath)) {
-            log.info("[WHISPER] Downloading Whisper...");
+            log.info("[WHISPER] Скачивание Whisper...");
             DownloadHelper.downloadAndExtractZip(WHISPER_URL, exePath.getParent(), "Whisper");
             exePath.toFile().setExecutable(true);
         } else {
-            log.info("[WHISPER] Found: {}", whisperPath);
+            log.info("[WHISPER] Найден: {}", whisperPath);
         }
 
         // Download model if missing
         if (Files.notExists(modelFilePath)) {
-            log.info("[WHISPER] Downloading ggml-large-v3 model...");
-            DownloadHelper.downloadWithProgress(MODEL_DOWNLOAD_URL, modelFilePath, "Whisper model");
+            log.info("[WHISPER] Скачивание модели ggml-large-v3...");
+            DownloadHelper.downloadWithProgress(MODEL_DOWNLOAD_URL, modelFilePath, "Модель Whisper");
         } else {
-            log.info("[WHISPER] Model found: {}", modelPath);
-            // Verify model file integrity by checking its size
+            log.info("[WHISPER] Модель найдена: {}", modelPath);
+            // Проверка целостности файла модели по размеру
             File modelFile = new File(modelPath);
-            if (modelFile.length() < 100000000) { // Less than 100MB likely means incomplete download
-                log.warn("[WHISPER] Model file appears too small ({} bytes), may be corrupted", modelFile.length());
+            if (modelFile.length() < 100000000) { // Меньше 100 МБ, скорее всего, неполная загрузка
+                log.warn("[WHISPER] Файл модели слишком мал ({} байт), возможно поврежден", modelFile.length());
             }
         }
     }
@@ -62,17 +62,17 @@ public class WhisperService {
     public boolean isModelValid() {
         Path modelFilePath = Paths.get(modelPath);
         if (Files.notExists(modelFilePath)) {
-            log.warn("[WHISPER] Model file does not exist: {}", modelPath);
+            log.warn("[WHISPER] Файл модели не существует: {}", modelPath);
             return false;
         }
 
         File modelFile = modelFilePath.toFile();
-        // Basic validation: model file for large-v3 should be around 1.8GB for
-        // quantized version
-        // Our file is about 115MB, so checking for minimum size to detect incomplete
-        // downloads
-        if (modelFile.length() < 100000000) { // Less than 100MB
-            log.warn("[WHISPER] Model file size is suspiciously small ({} bytes), likely corrupted",
+        // Базовая валидация: файл модели large-v3 должен быть около 1.8GB для
+        // квантованной версии
+        // Наш файл около 115МБ, проверяем минимальный размер для обнаружения неполных
+        // загрузок
+        if (modelFile.length() < 100000000) { // Меньше 100 МБ
+            log.warn("[WHISPER] Размер файла модели подозрительно мал ({} байт), вероятно поврежден",
                     modelFile.length());
             return false;
         }
@@ -81,12 +81,12 @@ public class WhisperService {
     }
 
     /**
-     * Transcribes audio file using Whisper
+     * Транскрибирует аудиофайл с использованием Whisper
      * 
-     * @param audioFile Path to the audio file to transcribe
-     * @return Transcribed text
-     * @throws IOException          If there's an issue with file operations
-     * @throws InterruptedException If the process is interrupted
+     * @param audioFile Путь к аудиофайлу для транскрипции
+     * @return Транскрибированный текст
+     * @throws IOException          Если возникла проблема с файловыми операциями
+     * @throws InterruptedException Если процесс был прерван
      */
     public String transcribe(File audioFile) throws IOException, InterruptedException {
         Object[] result = transcribeWithLanguage(audioFile);
@@ -94,55 +94,58 @@ public class WhisperService {
     }
 
     /**
-     * Transcribes audio file using Whisper and returns both transcription and
-     * detected language
+     * Транскрибирует аудиофайл с использованием Whisper и возвращает как
+     * транскрипцию, так и
+     * обнаруженный язык
      * 
-     * @param audioFile Path to the audio file to transcribe
-     * @return Object array with [transcription, language]
-     * @throws IOException          If there's an issue with file operations
-     * @throws InterruptedException If the process is interrupted
+     * @param audioFile Путь к аудиофайлу для транскрипции
+     * @return Массив объектов с [транскрипция, язык]
+     * @throws IOException          Если возникла проблема с файловыми операциями
+     * @throws InterruptedException Если процесс был прерван
      */
     public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
-        log.info("[WHISPER] Starting transcription with language detection for file: {}", audioFile.getAbsolutePath());
+        log.info("[WHISPER] Начало транскрипции с определением языка для файла: {}", audioFile.getAbsolutePath());
 
-        // Check if model is valid before proceeding
+        // Проверяем валидность модели перед продолжением
         if (!isModelValid()) {
-            log.warn("[WHISPER] Model validation failed, attempting to re-download model...");
-            ensureAvailable(); // This will re-download the model if it doesn't exist or is invalid
+            log.warn("[WHISPER] Валидация модели не удалась, попытка повторного скачивания...");
+            ensureAvailable(); // Это приведет к повторному скачиванию модели, если она не существует или
+                               // невалидна
 
-            // Double-check after re-download
+            // Повторная проверка после скачивания
             if (!isModelValid()) {
-                throw new RuntimeException("Whisper model is still invalid after re-download attempt");
+                throw new RuntimeException("Модель Whisper все еще невалидна после попытки скачивания");
             }
         }
 
-        // Create a temporary base path for the output
-        // We create a temp file to get a unique path, then delete it so Whisper can
-        // create its own files with extensions
+        // Создаем временный базовый путь для вывода
+        // Создаем временный файл, чтобы получить уникальный путь, затем удаляем его,
+        // чтобы Whisper мог
+        // создать свои собственные файлы с расширениями
         Path tempBaseFile = Files.createTempFile("whisper_out_lang_", "");
         Files.deleteIfExists(tempBaseFile);
         String basePath = tempBaseFile.toAbsolutePath().toString();
 
-        // Expected output files
+        // Ожидаемые выходные файлы
         Path jsonOutputFile = Paths.get(basePath + ".json");
         Path txtOutputFile = Paths.get(basePath + ".txt");
 
         try {
-            // Build the whisper command - using CPU with 4 threads for maximum quality
+            // Формирование команды whisper - использование CPU с 4 потоками
             String[] command = {
                     whisperPath,
                     "-m", modelPath,
                     "-f", audioFile.getAbsolutePath(),
-                    "-of", basePath, // Output file base path
-                    "--output-txt", // Output in plain text format
-                    "-oj", // Output in JSON format
-                    "--threads", String.valueOf(threads), // Use configured number of threads
-                    useGpu ? "" : "-ng", // Conditionally disable GPU usage
-                    "--language", "auto", // Auto-detect language
-                    "--word-thold", "0.01" // Lower threshold for word detection
+                    "-of", basePath, // Базовый путь выходного файла
+                    "--output-txt", // Вывод в текстовом формате
+                    "-oj", // Вывод в формате JSON
+                    "--threads", String.valueOf(threads), // Использовать настроенное количество потоков
+                    useGpu ? "" : "-ng", // Условно отключить использование GPU
+                    "--language", "auto", // Автоопределение языка
+                    "--word-thold", "0.01" // Нижний порог обнаружения слов
             };
 
-            // Remove empty string arguments
+            // Удаление пустых аргументов
             java.util.List<String> cmdList = new java.util.ArrayList<>();
             for (String arg : command) {
                 if (arg != null && !arg.isEmpty()) {
@@ -151,14 +154,14 @@ public class WhisperService {
             }
             command = cmdList.toArray(new String[0]);
 
-            log.debug("[WHISPER] Executing command: {}", String.join(" ", command));
+            log.debug("[WHISPER] Выполнение команды: {}", String.join(" ", command));
 
-            // Execute the command
+            // Выполнение команды
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Read the output from the process
+            // Чтение вывода процесса
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -171,7 +174,7 @@ public class WhisperService {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new RuntimeException(
-                        "Whisper command failed with exit code: " + exitCode + ", output: " + output.toString());
+                        "Команда Whisper завершилась с кодом: " + exitCode + ", вывод: " + output.toString());
             }
 
             String detectedLanguage = "unknown";
@@ -179,11 +182,11 @@ public class WhisperService {
 
             try {
                 if (Files.exists(jsonOutputFile)) {
-                    // Read the JSON output file which contains both language and transcription
+                    // Чтение выходного файла JSON, содержащего язык и транскрипцию
                     String jsonOutput = Files.readString(jsonOutputFile);
-                    log.debug("JSON output content: {}", jsonOutput);
+                    log.debug("Содержимое вывода JSON: {}", jsonOutput);
 
-                    // Extract language from JSON
+                    // Извлечение языка из JSON
                     if (jsonOutput.contains("\"language\"")) {
                         int langStart = jsonOutput.indexOf("\"language\":\"") + "\"language\":\"".length();
                         int langEnd = jsonOutput.indexOf("\"", langStart);
@@ -192,18 +195,18 @@ public class WhisperService {
                         }
                     }
 
-                    // Extract transcription from JSON - look for the text segments
-                    // More robust approach to extract all text from segments
+                    // Извлечение транскрипции из JSON - поиск текстовых сегментов
+                    // Более надежный подход для извлечения всего текста из сегментов
                     if (jsonOutput.contains("\"segments\"")) {
-                        // Find the segments array and extract all text values
+                        // Поиск массива сегментов и извлечение всех текстовых значений
                         StringBuilder transcriptBuilder = new StringBuilder();
 
-                        // Find the segments array start and end
+                        // Поиск начала и конца массива сегментов
                         int segmentsStart = jsonOutput.indexOf("\"segments\"");
                         if (segmentsStart != -1) {
                             int arrayStart = jsonOutput.indexOf("[", segmentsStart);
                             if (arrayStart != -1) {
-                                // Find the matching closing bracket for the array
+                                // Поиск соответствующей закрывающей скобки для массива
                                 int bracketCount = 0;
                                 int pos = arrayStart;
                                 for (; pos < jsonOutput.length(); pos++) {
@@ -221,7 +224,7 @@ public class WhisperService {
                                 if (pos < jsonOutput.length()) {
                                     String segmentsArray = jsonOutput.substring(arrayStart, pos + 1);
 
-                                    // Extract all text fields from the segments
+                                    // Извлечение всех текстовых полей из сегментов
                                     int textIndex = 0;
                                     while ((textIndex = segmentsArray.indexOf("\"text\":\"", textIndex)) != -1) {
                                         textIndex += "\"text\":\"".length();
@@ -229,13 +232,13 @@ public class WhisperService {
 
                                         if (textEnd != -1) {
                                             String segmentText = segmentsArray.substring(textIndex, textEnd);
-                                            // Properly unescape JSON strings
+                                            // Правильное деэкранирование JSON строк
                                             segmentText = segmentText.replace("\\\"", "\"")
                                                     .replace("\\n", "\n")
                                                     .replace("\\t", "\t")
                                                     .replace("\\r", "\r");
                                             transcriptBuilder.append(segmentText.trim()).append(" ");
-                                            textIndex = textEnd; // Continue searching after this position
+                                            textIndex = textEnd; // Продолжение поиска после этой позиции
                                         }
                                     }
                                 }
@@ -245,20 +248,20 @@ public class WhisperService {
                         transcription = transcriptBuilder.toString().trim();
                     }
                 } else {
-                    log.warn("[WHISPER] JSON output file not found: {}", jsonOutputFile);
+                    log.warn("[WHISPER] Файл вывода JSON не найден: {}", jsonOutputFile);
                 }
             } catch (Exception e) {
-                log.warn("Could not parse JSON output, falling back to text file: {}", e.getMessage());
+                log.warn("Не удалось разобрать вывод JSON, переход к текстовому файлу: {}", e.getMessage());
             }
 
-            // Fallback to reading the text file
+            // Переход к чтению текстового файла
             if (transcription.isEmpty()) {
                 try {
                     if (Files.exists(txtOutputFile)) {
                         transcription = Files.readString(txtOutputFile);
-                        log.debug("Fallback transcription content: {}", transcription);
+                        log.debug("Содержимое резервной транскрипции: {}", transcription);
 
-                        // Extract language from the text file if not already extracted
+                        // Извлечение языка из текстового файла, если он еще не извлечен
                         if (detectedLanguage.equals("unknown") && transcription.contains("auto-detected language:")) {
                             int langStart = transcription.indexOf("auto-detected language:")
                                     + "auto-detected language:".length();
@@ -276,27 +279,27 @@ public class WhisperService {
                             }
                         }
                     } else {
-                        log.warn("[WHISPER] Text output file not found: {}", txtOutputFile);
+                        log.warn("[WHISPER] Текстовый файл вывода не найден: {}", txtOutputFile);
                     }
                 } catch (IOException ioEx) {
-                    log.error("Could not read text output file: {}", ioEx.getMessage());
+                    log.error("Не удалось прочитать текстовый файл вывода: {}", ioEx.getMessage());
                 }
             }
 
-            log.info("[WHISPER] Transcription completed successfully, language: {}, length: {} chars", detectedLanguage,
+            log.info("[WHISPER] Транскрипция успешно завершена, язык: {}, длина: {} символов", detectedLanguage,
                     transcription.length());
             return new Object[] { transcription.trim(), detectedLanguage };
         } finally {
-            // Clean up temporary files
+            // Очистка временных файлов
             try {
                 Files.deleteIfExists(jsonOutputFile);
             } catch (IOException e) {
-                log.warn("Could not delete temporary JSON transcription file: {}", jsonOutputFile, e);
+                log.warn("Не удалось удалить временный файл транскрипции JSON: {}", jsonOutputFile, e);
             }
             try {
                 Files.deleteIfExists(txtOutputFile);
             } catch (IOException e) {
-                log.warn("Could not delete temporary transcription file: {}", txtOutputFile, e);
+                log.warn("Не удалось удалить временный файл транскрипции: {}", txtOutputFile, e);
             }
         }
     }

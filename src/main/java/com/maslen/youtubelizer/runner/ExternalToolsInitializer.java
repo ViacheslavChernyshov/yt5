@@ -24,23 +24,23 @@ public class ExternalToolsInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        log.info("Initializing external tools...");
+        log.info("Инициализация внешних инструментов...");
         try {
-            log.info("Ensuring yt-dlp is available...");
+            log.info("Проверка доступности yt-dlp...");
             ytDlpService.ensureAvailable();
 
-            log.info("Ensuring FFmpeg is available...");
+            log.info("Проверка доступности FFmpeg...");
             ffmpegService.ensureAvailable();
 
-            log.info("Ensuring Whisper is available...");
+            log.info("Проверка доступности Whisper...");
             whisperService.ensureAvailable();
 
-            log.info("Ensuring Llama.cpp and Qwen model are available...");
+            log.info("Проверка доступности Llama.cpp и модели Qwen...");
             llamaService.ensureAvailable();
 
-            log.info("All external tools initialized successfully");
+            log.info("Все внешние инструменты успешно инициализированы");
         } catch (IOException e) {
-            log.error("Failed to initialize external tools", e);
+            log.error("Не удалось инициализировать внешние инструменты", e);
             throw e;
         }
     }

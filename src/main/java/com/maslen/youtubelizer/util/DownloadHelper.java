@@ -17,7 +17,7 @@ import java.util.zip.ZipInputStream;
 public class DownloadHelper {
 
     private DownloadHelper() {
-        // Utility class
+        // Утилитный класс
     }
 
     /**
@@ -112,7 +112,7 @@ public class DownloadHelper {
             ZipEntry zipEntry = zis.getNextEntry();
             while (zipEntry != null) {
                 String fileName = zipEntry.getName();
-                // Flatten: все файлы в одну директорию
+                // Развертывание: все файлы в одну директорию
                 String simpleFileName = Paths.get(fileName).getFileName().toString();
                 Path newFile = targetDir.resolve(simpleFileName);
 
