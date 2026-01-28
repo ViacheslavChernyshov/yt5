@@ -2,7 +2,6 @@ package com.maslen.youtubelizer.runner;
 
 import com.maslen.youtubelizer.service.FfmpegService;
 import com.maslen.youtubelizer.service.LlamaService;
-import com.maslen.youtubelizer.service.ToolsRegistry;
 import com.maslen.youtubelizer.service.WhisperService;
 import com.maslen.youtubelizer.service.YtDlpService;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +21,6 @@ public class ExternalToolsInitializer implements ApplicationRunner {
     private final FfmpegService ffmpegService;
     private final WhisperService whisperService;
     private final LlamaService llamaService;
-    private final ToolsRegistry toolsRegistry;
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
@@ -40,8 +38,7 @@ public class ExternalToolsInitializer implements ApplicationRunner {
             log.info("Ensuring Llama.cpp and Qwen model are available...");
             llamaService.ensureAvailable();
 
-            log.info("All external tools are initialized successfully");
-            toolsRegistry.markInitialized();
+            log.info("All external tools initialized successfully");
         } catch (IOException e) {
             log.error("Failed to initialize external tools", e);
             throw e;

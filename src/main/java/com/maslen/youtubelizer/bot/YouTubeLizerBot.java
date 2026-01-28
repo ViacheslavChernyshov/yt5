@@ -230,13 +230,16 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 queueDownloadTask(chatId, videoId, TaskType.AUDIO);
                 break;
             case "speech_recognition":
-                responseText = "🎙️ Начинается распознавание речи...";
+                responseText = "🎙️ Задача добавлена в очередь. Начинается распознавание речи...";
+                queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION);
                 break;
             case "normalize_text":
-                responseText = "📝 Начинается нормализация текста...";
+                responseText = "📝 Задача добавлена в очередь. Начинается нормализация текста...";
+                queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION);
                 break;
             case "process_all_zip":
-                responseText = "📦 Выполняются все операции и создается ZIP-архив...";
+                responseText = "📦 Задача добавлена в очередь. Готовлю ZIP-архив со всеми материалами...";
+                queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP);
                 break;
             default:
                 responseText = "Неизвестная команда";

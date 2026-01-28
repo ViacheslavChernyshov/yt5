@@ -10,7 +10,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "download_tasks")
+@Table(name = "download_tasks", uniqueConstraints = @UniqueConstraint(columnNames = {"video_id", "type"}))
 @Data
 public class DownloadTask {
 
@@ -21,7 +21,7 @@ public class DownloadTask {
     @Column(name = "chat_id", nullable = false)
     private Long chatId;
 
-    @Column(name = "video_id", nullable = false)
+    @Column(name = "video_id", nullable = false, length = 100)
     private String videoId;
 
     @Enumerated(EnumType.STRING)
@@ -32,7 +32,7 @@ public class DownloadTask {
     @Column(name = "status", nullable = false)
     private TaskStatus status;
 
-    @Column(name = "error_message")
+    @Column(name = "error_message", length = 2048)
     private String errorMessage;
 
     @CreationTimestamp
