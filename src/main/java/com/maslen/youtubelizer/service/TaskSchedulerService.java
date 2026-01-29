@@ -33,6 +33,8 @@ import java.util.zip.ZipOutputStream;
 import java.io.FileOutputStream;
 import java.io.FileInputStream;
 import java.util.stream.Stream;
+import org.telegram.telegrambots.meta.api.methods.invoices.SendInvoice;
+import org.telegram.telegrambots.meta.api.objects.payments.LabeledPrice;
 
 @Slf4j
 @Service
@@ -174,6 +176,11 @@ public class TaskSchedulerService {
         }
 
         downloadTaskRepository.save(task);
+
+        // Send donation menu only for successfully completed tasks
+        if (task.getStatus() == TaskStatus.COMPLETED) {
+            sendDonationMenu(task.getChatId(), task.getLanguageCode());
+        }
     }
 
     private void processSpeechRecognitionTask(DownloadTask task, String url) throws IOException, InterruptedException {
@@ -611,6 +618,81 @@ public class TaskSchedulerService {
             telegramClient.execute(message);
         } catch (TelegramApiException e) {
             log.error("Failed to send message: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Sends a donation menu with multiple amount options after successful task
+     * completion.
+     */
+    private void sendDonationMenu(long chatId, String languageCode) {
+        try {
+            // Create inline keyboard with donation options
+            var keyboard = new java.util.ArrayList<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow>();
+
+            // Row 1: 10, 50, 100 stars
+            var row1 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
+            row1.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                    .text("⭐ 10")
+                    .callbackData("donate:10")
+                    .build());
+            row1.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                    .text("⭐ 50")
+                    .callbackData("donate:50")
+                    .build());
+            row1.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                    .text("⭐ 100")
+                    .callbackData("donate:100")
+                    .build());
+            keyboard.add(row1);
+
+            // Row 2: Custom amount
+            var row2 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
+            row2.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                    .text(messageService.getMessage("donation.custom", languageCode))
+                    .callbackData("donate:custom")
+                    .build());
+            keyboard.add(row2);
+
+            var markup = org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup.builder()
+                    .keyboard(keyboard)
+                    .build();
+
+            SendMessage message = SendMessage.builder()
+                    .chatId(chatId)
+                    .text(messageService.getMessage("donation.choose_amount", languageCode))
+                    .replyMarkup(markup)
+                    .build();
+
+            telegramClient.execute(message);
+            log.info("Donation menu sent to chat {}", chatId);
+        } catch (TelegramApiException e) {
+            log.warn("Failed to send donation menu: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Sends a donation invoice for Telegram Stars with specified amount.
+     * Called from bot when user selects an amount.
+     */
+    public void sendDonationInvoice(long chatId, int amount, String languageCode) {
+        try {
+            String label = "⭐ " + amount + " Stars";
+            SendInvoice sendInvoice = SendInvoice.builder()
+                    .chatId(chatId)
+                    .title(messageService.getMessage("donation.title", languageCode))
+                    .description(messageService.getMessage("donation.description", languageCode))
+                    .payload("donation_" + amount + "_stars_" + System.currentTimeMillis())
+                    .currency("XTR")
+                    .providerToken("")
+                    .price(new LabeledPrice(label, amount))
+                    .startParameter("donate")
+                    .build();
+
+            telegramClient.execute(sendInvoice);
+            log.info("Donation invoice for {} stars sent to chat {}", amount, chatId);
+        } catch (TelegramApiException e) {
+            log.warn("Failed to send donation invoice: {}", e.getMessage());
         }
     }
 }

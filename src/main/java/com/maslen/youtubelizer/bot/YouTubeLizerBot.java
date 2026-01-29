@@ -23,6 +23,9 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.methods.AnswerPreCheckoutQuery;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.payments.PreCheckoutQuery;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import jakarta.annotation.PostConstruct;
@@ -50,6 +53,12 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
     @Autowired
     private MessageService messageService;
+
+    @Autowired
+    private com.maslen.youtubelizer.service.TaskSchedulerService taskSchedulerService;
+
+    // Track users waiting to enter custom donation amount: chatId -> languageCode
+    private final java.util.Map<Long, String> pendingDonationUsers = new java.util.concurrent.ConcurrentHashMap<>();
 
     public YouTubeLizerBot(@Value("${telegram.bot.token}") String botToken, TelegramClient telegramClient) {
         this.botToken = botToken;
@@ -89,6 +98,11 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             String languageCode = update.getMessage().getFrom().getLanguageCode();
 
             log.info("[BOT] Получено сообщение от {} (lang: {}): {}", userName, languageCode, messageText);
+
+            // Check if user is entering a custom donation amount
+            if (handleCustomDonationAmount(chatId, messageText, languageCode)) {
+                return; // Message was handled as donation amount
+            }
 
             if (messageText.equals("/start") || messageText.equals("/help")) {
                 sendMessage(chatId, messageService.getMessage("bot.welcome", languageCode));
@@ -131,6 +145,12 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             }
         } else if (update.hasCallbackQuery()) {
             handleCallbackQuery(update.getCallbackQuery());
+        } else if (update.hasPreCheckoutQuery()) {
+            // Approve pre-checkout query for Telegram Stars payments
+            handlePreCheckoutQuery(update.getPreCheckoutQuery());
+        } else if (update.hasMessage() && update.getMessage().hasSuccessfulPayment()) {
+            // Handle successful payment
+            handleSuccessfulPayment(update.getMessage());
         }
     }
 
@@ -246,6 +266,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
                 queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
                 break;
+            case "donate":
+                handleDonateCallback(chatId, messageId, videoId, languageCode, callbackQuery.getId());
+                return; // Early return, handled separately
             default:
                 actionName = "Unknown action";
                 responseText = "Unknown command";
@@ -289,5 +312,99 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         task.setLanguageCode(languageCode);
         downloadTaskRepository.save(task);
         log.info("Task queued: videoId={}, type={}, lang={}", videoId, type, languageCode);
+    }
+
+    /**
+     * Handles pre-checkout query for Telegram Stars payments.
+     * Must respond within 10 seconds.
+     */
+    private void handlePreCheckoutQuery(PreCheckoutQuery preCheckoutQuery) {
+        log.info("[BOT] Pre-checkout query received: payload={}", preCheckoutQuery.getInvoicePayload());
+
+        try {
+            // Always approve the pre-checkout for donations
+            AnswerPreCheckoutQuery answer = AnswerPreCheckoutQuery.builder()
+                    .preCheckoutQueryId(preCheckoutQuery.getId())
+                    .ok(true)
+                    .build();
+            telegramClient.execute(answer);
+            log.info("[BOT] Pre-checkout approved for user {}", preCheckoutQuery.getFrom().getId());
+        } catch (TelegramApiException e) {
+            log.error("[BOT] Failed to answer pre-checkout query: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Handles successful payment for Telegram Stars donations.
+     */
+    private void handleSuccessfulPayment(Message message) {
+        var payment = message.getSuccessfulPayment();
+        long chatId = message.getChatId();
+        String languageCode = message.getFrom().getLanguageCode();
+
+        log.info("[BOT] Successful payment: amount={} {}, from user {}",
+                payment.getTotalAmount(), payment.getCurrency(), message.getFrom().getId());
+
+        // Thank the user for their donation
+        sendMessage(chatId, messageService.getMessage("donation.thank_you", languageCode));
+    }
+
+    /**
+     * Handles donation callback (10, 50, 100 stars or custom amount).
+     */
+    private void handleDonateCallback(long chatId, int messageId, String amountStr, String languageCode,
+            String callbackId) {
+        try {
+            // Answer the callback query first
+            telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
+                    .callbackQueryId(callbackId)
+                    .build());
+
+            // Remove the donation menu
+            telegramClient.execute(org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage.builder()
+                    .chatId(chatId)
+                    .messageId(messageId)
+                    .build());
+
+            if ("custom".equals(amountStr)) {
+                // Ask user to enter custom amount
+                pendingDonationUsers.put(chatId, languageCode);
+                sendMessage(chatId, messageService.getMessage("donation.enter_amount", languageCode));
+            } else {
+                // Send invoice with selected amount
+                int amount = Integer.parseInt(amountStr);
+                taskSchedulerService.sendDonationInvoice(chatId, amount, languageCode);
+            }
+        } catch (TelegramApiException e) {
+            log.error("[BOT] Failed to handle donate callback: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Handles custom donation amount entered by user.
+     * Returns true if message was handled as donation amount.
+     */
+    private boolean handleCustomDonationAmount(long chatId, String text, String languageCode) {
+        if (!pendingDonationUsers.containsKey(chatId)) {
+            return false;
+        }
+
+        String savedLanguageCode = pendingDonationUsers.remove(chatId);
+
+        try {
+            int amount = Integer.parseInt(text.trim());
+            if (amount < 1 || amount > 2500) {
+                sendMessage(chatId, "⚠️ Please enter a number between 1 and 2500");
+                pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
+                return true;
+            }
+
+            taskSchedulerService.sendDonationInvoice(chatId, amount, savedLanguageCode);
+        } catch (NumberFormatException e) {
+            sendMessage(chatId, "⚠️ Please enter a valid number");
+            pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
+        }
+
+        return true;
     }
 }
