@@ -90,7 +90,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
             log.info("[BOT] Получено сообщение от {} (lang: {}): {}", userName, languageCode, messageText);
 
-            if (messageText.equals("/start")) {
+            if (messageText.equals("/start") || messageText.equals("/help")) {
                 sendMessage(chatId, messageService.getMessage("bot.welcome", languageCode));
             } else if (youTubeService.isValidYouTubeLink(messageText)) {
                 // Логируем запрос
