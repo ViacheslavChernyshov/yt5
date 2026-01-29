@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import com.maslen.youtubelizer.service.MessageService;
 import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
@@ -46,6 +47,9 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
     @Autowired
     private DownloadTaskRepository downloadTaskRepository;
+
+    @Autowired
+    private MessageService messageService;
 
     public YouTubeLizerBot(@Value("${telegram.bot.token}") String botToken, TelegramClient telegramClient) {
         this.botToken = botToken;
@@ -82,14 +86,12 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             long chatId = update.getMessage().getChatId();
             String userName = update.getMessage().getFrom().getFirstName();
             Long userId = update.getMessage().getFrom().getId();
+            String languageCode = update.getMessage().getFrom().getLanguageCode();
 
-            log.info("[BOT] Получено сообщение от {}: {}", userName, messageText);
+            log.info("[BOT] Получено сообщение от {} (lang: {}): {}", userName, languageCode, messageText);
 
             if (messageText.equals("/start")) {
-                sendMessage(chatId, "👋 Привет, " + userName + "!\n\n" +
-                        "Я YouTubeLizer Bot. Отправь мне ссылку на YouTube видео или шортс, " +
-                        "и я помогу тебе с его обработкой!\n\n" +
-                        "📝 Просто отправь ссылку на видео.");
+                sendMessage(chatId, messageService.getMessage("bot.welcome", languageCode));
             } else if (youTubeService.isValidYouTubeLink(messageText)) {
                 // Логируем запрос
                 String videoId = youTubeService.extractVideoId(messageText);
@@ -105,12 +107,13 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                     // Сохраняем обновленный запрос
                     youTubeService.createRequest(userId, userName, messageText, true, messageText, videoId, channel);
 
-                    sendMessageWithKeyboard(chatId, "🎬 Валидная YouTube ссылка найдена!\n" +
-                            "Видео ID: " + videoId + "\n" +
-                            "Канал: "
-                            + (channel.getChannelTitle() != null ? channel.getChannelTitle() : "Неизвестный канал")
-                            + "\n\n" +
-                            "Выберите действие:", videoId);
+                    sendMessageWithKeyboard(
+                            chatId, messageService.getMessage("bot.select_action", languageCode) + "\n" +
+                                    "Video ID: " + videoId + "\n" +
+                                    "Channel: "
+                                    + (channel.getChannelTitle() != null ? channel.getChannelTitle()
+                                            : "Unknown channel"),
+                            videoId, languageCode);
 
                 } catch (Exception e) {
                     log.error("[BOT] Ошибка обработки ссылки YouTube: {}", e.getMessage(), e);
@@ -118,19 +121,13 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                     // Логируем невалидный запрос
                     youTubeService.createRequest(userId, userName, messageText, false, messageText, videoId, null);
 
-                    sendMessage(chatId, "❌ Произошла ошибка при обработке YouTube ссылки.\n" +
-                            "Пожалуйста, проверьте ссылку и попробуйте снова.");
+                    sendMessage(chatId, messageService.getMessage("common.error", languageCode) + e.getMessage());
                 }
             } else {
                 // Log invalid request
                 youTubeService.createRequest(userId, userName, messageText, false, messageText, null, null);
 
-                sendMessage(chatId, "❌ Отправленная вами ссылка не является валидной YouTube ссылкой.\n" +
-                        "Пожалуйста, отправьте ссылку на YouTube видео или шортс.\n\n" +
-                        "Примеры:\n" +
-                        "- https://www.youtube.com/watch?v=...\n" +
-                        "- https://youtu.be/...\n" +
-                        "- https://www.youtube.com/shorts/...");
+                sendMessage(chatId, messageService.getMessage("bot.invalid_link", languageCode));
             }
         } else if (update.hasCallbackQuery()) {
             handleCallbackQuery(update.getCallbackQuery());
@@ -150,11 +147,11 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         }
     }
 
-    private void sendMessageWithKeyboard(long chatId, String text, String videoId) {
+    private void sendMessageWithKeyboard(long chatId, String text, String videoId, String languageCode) {
         SendMessage message = SendMessage.builder()
                 .chatId(chatId)
                 .text(text)
-                .replyMarkup(createProcessingOptionsKeyboard(videoId))
+                .replyMarkup(createProcessingOptionsKeyboard(videoId, languageCode))
                 .build();
         try {
             telegramClient.execute(message);
@@ -166,18 +163,18 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         }
     }
 
-    private InlineKeyboardMarkup createProcessingOptionsKeyboard(String videoId) {
+    private InlineKeyboardMarkup createProcessingOptionsKeyboard(String videoId, String languageCode) {
         // Создаем клавиатуру, используя правильную структуру для этой версии библиотеки
         List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow> keyboard = new ArrayList<>();
 
         // Первый ряд: Скачать видео и Скачать аудио
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row1 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row1.add(InlineKeyboardButton.builder()
-                .text("📹 Загрузка видео")
+                .text(messageService.getMessage("bot.button.video", languageCode))
                 .callbackData("download_video:" + videoId)
                 .build());
         row1.add(InlineKeyboardButton.builder()
-                .text("🎧 Загрузка аудио")
+                .text(messageService.getMessage("bot.button.audio", languageCode))
                 .callbackData("download_audio:" + videoId)
                 .build());
         keyboard.add(row1);
@@ -185,11 +182,11 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         // Второй ряд: Распознавание речи и Нормализация текста
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row2 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row2.add(InlineKeyboardButton.builder()
-                .text("🗣️ Распознавание речи")
+                .text(messageService.getMessage("bot.button.text", languageCode))
                 .callbackData("speech_recognition:" + videoId)
                 .build());
         row2.add(InlineKeyboardButton.builder()
-                .text("📝 Нормализация текста")
+                .text(messageService.getMessage("common.normalizing", languageCode))
                 .callbackData("normalize_text:" + videoId)
                 .build());
         keyboard.add(row2);
@@ -197,7 +194,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         // Третий ряд: Выполнить все и запаковать в ZIP
         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row3 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
         row3.add(InlineKeyboardButton.builder()
-                .text("📦 Выполнить все и запаковать ZIP")
+                .text(messageService.getMessage("bot.button.zip", languageCode))
                 .callbackData("process_all_zip:" + videoId)
                 .build());
         keyboard.add(row3);
@@ -212,6 +209,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         long chatId = callbackQuery.getMessage().getChatId();
         int messageId = callbackQuery.getMessage().getMessageId();
         String userId = callbackQuery.getFrom().getId().toString();
+        String languageCode = callbackQuery.getFrom().getLanguageCode();
 
         log.info("[BOT] Получен callback: {} от пользователя: {}", callbackData, userId);
 
@@ -224,33 +222,33 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         String responseText = "";
         switch (action) {
             case "download_video":
-                actionName = "📹 Загрузка видео";
-                responseText = "📥 Задача добавлена в очередь. Ожидайте загрузки видео...";
-                queueDownloadTask(chatId, videoId, TaskType.VIDEO);
+                actionName = messageService.getMessage("bot.button.video", languageCode);
+                responseText = messageService.getMessage("bot.task_scheduled", languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.VIDEO, languageCode);
                 break;
             case "download_audio":
-                actionName = "🎧 Загрузка аудио";
-                responseText = "📥 Задача добавлена в очередь. Ожидайте загрузки аудио...";
-                queueDownloadTask(chatId, videoId, TaskType.AUDIO);
+                actionName = messageService.getMessage("bot.button.audio", languageCode);
+                responseText = messageService.getMessage("bot.task_scheduled", languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.AUDIO, languageCode);
                 break;
             case "speech_recognition":
-                actionName = "🗣️ Распознавание речи";
-                responseText = "🎙️ Задача добавлена в очередь. Начинается распознавание речи...";
-                queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION);
+                actionName = messageService.getMessage("bot.button.text", languageCode);
+                responseText = messageService.getMessage("bot.task_scheduled", languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION, languageCode);
                 break;
             case "normalize_text":
-                actionName = "📝 Нормализация текста";
-                responseText = "📝 Задача добавлена в очередь. Начинается нормализация текста...";
-                queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION);
+                actionName = messageService.getMessage("common.normalizing", languageCode);
+                responseText = messageService.getMessage("bot.task_scheduled", languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION, languageCode);
                 break;
             case "process_all_zip":
-                actionName = "📦 Полная обработка (ZIP)";
-                responseText = "📦 Задача добавлена в очередь. Готовлю ZIP-архив со всеми материалами...";
-                queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP);
+                actionName = messageService.getMessage("bot.button.zip", languageCode);
+                responseText = messageService.getMessage("bot.task_scheduled", languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
                 break;
             default:
-                actionName = "Неизвестное действие";
-                responseText = "Неизвестная команда";
+                actionName = "Unknown action";
+                responseText = "Unknown command";
         }
 
         // Отправка ответа пользователю
@@ -273,7 +271,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             EditMessageText editMessage = EditMessageText.builder()
                     .chatId(chatId)
                     .messageId(messageId)
-                    .text("✅ Выбрано: " + actionName)
+                    .text("✅ " + actionName)
                     .replyMarkup(null) // Удаляем клавиатуру
                     .build();
             telegramClient.execute(editMessage);
@@ -282,13 +280,14 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         }
     }
 
-    private void queueDownloadTask(long chatId, String videoId, TaskType type) {
+    private void queueDownloadTask(long chatId, String videoId, TaskType type, String languageCode) {
         DownloadTask task = new DownloadTask();
         task.setChatId(chatId);
         task.setVideoId(videoId);
         task.setType(type);
         task.setStatus(TaskStatus.PENDING);
+        task.setLanguageCode(languageCode);
         downloadTaskRepository.save(task);
-        log.info("Задача на скачивание добавлена в очередь: videoId={}, type={}", videoId, type);
+        log.info("Task queued: videoId={}, type={}, lang={}", videoId, type, languageCode);
     }
 }

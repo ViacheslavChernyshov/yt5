@@ -9,6 +9,7 @@ import com.maslen.youtubelizer.repository.DownloadTaskRepository;
 import com.maslen.youtubelizer.repository.RequestRepository;
 import com.maslen.youtubelizer.repository.VideoRepository;
 import lombok.extern.slf4j.Slf4j;
+import com.maslen.youtubelizer.service.MessageService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,9 @@ public class TaskSchedulerService {
 
     @Autowired
     private VideoRepository videoRepository;
+
+    @Autowired
+    private MessageService messageService;
 
     @Scheduled(fixedDelay = 10000) // Increased delay to 10 seconds to allow Flyway to run first
     public void processNextTask() {
@@ -117,7 +121,7 @@ public class TaskSchedulerService {
             if (task.getType() == TaskType.VIDEO) {
                 file = ytDlpService.downloadVideo(url, Paths.get("downloads"), task.getVideoId());
                 if (file != null && file.exists()) {
-                    sendContent(task.getChatId(), file, task.getType().name());
+                    sendContent(task.getChatId(), file, task.getType().name(), task.getLanguageCode());
                     task.setStatus(TaskStatus.COMPLETED);
 
                     // Удаление файла после отправки
@@ -128,13 +132,14 @@ public class TaskSchedulerService {
                     }
                 } else {
                     task.setStatus(TaskStatus.FAILED);
-                    task.setErrorMessage("Видео файл не найден после скачивания");
-                    sendMessage(task.getChatId(), "❌ Ошибка: видео не было скачано.");
+                    task.setErrorMessage("Video file not found after download");
+                    sendMessage(task.getChatId(),
+                            messageService.getMessage("error.download_failed", task.getLanguageCode()));
                 }
             } else if (task.getType() == TaskType.AUDIO) {
                 file = ytDlpService.downloadAudio(url, Paths.get("downloads"), task.getVideoId());
                 if (file != null && file.exists()) {
-                    sendContent(task.getChatId(), file, task.getType().name());
+                    sendContent(task.getChatId(), file, task.getType().name(), task.getLanguageCode());
                     task.setStatus(TaskStatus.COMPLETED);
 
                     // Удаление файла после отправки
@@ -145,8 +150,9 @@ public class TaskSchedulerService {
                     }
                 } else {
                     task.setStatus(TaskStatus.FAILED);
-                    task.setErrorMessage("Аудио файл не найден после скачивания");
-                    sendMessage(task.getChatId(), "❌ Ошибка: аудио не было скачано.");
+                    task.setErrorMessage("Audio file not found after download");
+                    sendMessage(task.getChatId(),
+                            messageService.getMessage("error.download_failed", task.getLanguageCode()));
                 }
             } else if (task.getType() == TaskType.SPEECH_RECOGNITION) {
                 processSpeechRecognitionTask(task, url);
@@ -162,7 +168,9 @@ public class TaskSchedulerService {
             log.error("Ошибка при обработке задачи {}", task.getId(), e);
             task.setStatus(TaskStatus.FAILED);
             task.setErrorMessage(e.getMessage());
-            sendMessage(task.getChatId(), "❌ Произошла ошибка при обработке запроса: " + e.getMessage());
+            task.setErrorMessage(e.getMessage());
+            sendMessage(task.getChatId(),
+                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
         }
 
         downloadTaskRepository.save(task);
@@ -175,7 +183,8 @@ public class TaskSchedulerService {
                 && !videoOpt.get().getTranscriptionText().isEmpty()) {
 
             log.info("Найдена кэшированная транскрипция для видео: {}", task.getVideoId());
-            sendTranscriptionToUser(task.getChatId(), videoOpt.get().getTranscriptionText(), task.getVideoId());
+            sendTranscriptionToUser(task.getChatId(), videoOpt.get().getTranscriptionText(), task.getVideoId(),
+                    task.getLanguageCode());
             task.setStatus(TaskStatus.COMPLETED);
             return;
         }
@@ -185,7 +194,8 @@ public class TaskSchedulerService {
 
         if (video != null) {
             // Шаг 3: Отправляем транскрипцию пользователю
-            sendTranscriptionToUser(task.getChatId(), video.getTranscriptionText(), task.getVideoId());
+            sendTranscriptionToUser(task.getChatId(), video.getTranscriptionText(), task.getVideoId(),
+                    task.getLanguageCode());
             task.setStatus(TaskStatus.COMPLETED);
         }
     }
@@ -201,7 +211,8 @@ public class TaskSchedulerService {
                 && !videoOpt.get().getNormalizedText().isEmpty()) {
 
             log.info("Найден кэшированный нормализованный текст для видео: {}", task.getVideoId());
-            sendNormalizedTextToUser(task.getChatId(), videoOpt.get().getNormalizedText(), task.getVideoId());
+            sendNormalizedTextToUser(task.getChatId(), videoOpt.get().getNormalizedText(), task.getVideoId(),
+                    task.getLanguageCode());
             task.setStatus(TaskStatus.COMPLETED);
             return;
         }
@@ -213,7 +224,8 @@ public class TaskSchedulerService {
             video = videoOpt.get();
         } else {
             // Шаг 3: Нет транскрипции? Сначала нужно скачать и транскрибировать!
-            sendMessage(task.getChatId(), "⏳ Транскрипция не найдена. Начинаю процесс скачивания и распознавания...");
+            // Шаг 3: Нет транскрипции? Сначала нужно скачать и транскрибировать!
+            sendMessage(task.getChatId(), messageService.getMessage("common.transcribing", task.getLanguageCode()));
             video = performTranscription(task, url);
             if (video == null)
                 return; // Ошибка произошла в performTranscription
@@ -228,8 +240,9 @@ public class TaskSchedulerService {
 
             if (normalizedText == null || normalizedText.trim().isEmpty()) {
                 task.setStatus(TaskStatus.FAILED);
-                task.setErrorMessage("Нормализация вернула пустой результат");
-                sendMessage(task.getChatId(), "❌ Ошибка: нейросеть вернула пустой результат.");
+                task.setErrorMessage("Normalization returned empty result");
+                sendMessage(task.getChatId(),
+                        messageService.getMessage("common.error", task.getLanguageCode()) + " Empty result from LLM");
                 return;
             }
 
@@ -239,7 +252,7 @@ public class TaskSchedulerService {
             log.info("[TEXT_NORMALIZATION] Сохранен нормализованный текст для видео: {}", task.getVideoId());
 
             // Шаг 6: Отправка нормализованного текста пользователю
-            sendNormalizedTextToUser(task.getChatId(), normalizedText, task.getVideoId());
+            sendNormalizedTextToUser(task.getChatId(), normalizedText, task.getVideoId(), task.getLanguageCode());
 
             // Шаг 7: Отметка задачи как выполненной
             task.setStatus(TaskStatus.COMPLETED);
@@ -248,8 +261,9 @@ public class TaskSchedulerService {
         } catch (Exception e) {
             log.error("[TEXT_NORMALIZATION] Ошибка нормализации текста для видео: {}", task.getVideoId(), e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Ошибка нормализации: " + e.getMessage());
-            sendMessage(task.getChatId(), "❌ Ошибка при нормализации текста: " + e.getMessage());
+            task.setErrorMessage("Error during normalization: " + e.getMessage());
+            sendMessage(task.getChatId(),
+                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
         }
     }
 
@@ -263,8 +277,8 @@ public class TaskSchedulerService {
 
         if (audioFile == null || !audioFile.exists()) {
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Аудио файл не найден после скачивания");
-            sendMessage(task.getChatId(), "❌ Ошибка: не удалось скачать аудио для распознавания речи.");
+            task.setErrorMessage("Audio file not found after download");
+            sendMessage(task.getChatId(), messageService.getMessage("error.download_failed", task.getLanguageCode()));
             return null;
         }
 
@@ -295,19 +309,21 @@ public class TaskSchedulerService {
         return saveTranscriptionResult(task, transcription, detectedLanguage);
     }
 
-    private void sendNormalizedTextToUser(Long chatId, String normalizedText, String videoId) {
+    private void sendNormalizedTextToUser(Long chatId, String normalizedText, String videoId, String languageCode) {
         try {
             // If text is too long for a single message, split it
             if (normalizedText.length() > 4000) {
                 String[] parts = splitString(normalizedText, 4000);
                 for (int i = 0; i < parts.length; i++) {
-                    String part = String.format("📝 Нормализованный текст (часть %d/%d):\n\n%s",
+                    String part = String.format("📝 %s (%d/%d):\n\n%s",
+                            messageService.getMessage("common.normalizing", languageCode),
                             i + 1, parts.length, parts[i]);
                     sendMessage(chatId, part);
                     Thread.sleep(1000); // Small delay between messages
                 }
             } else {
-                String message = "✨ Нормализованный текст для видео " + videoId + ":\n\n" + normalizedText;
+                String message = "✨ " + messageService.getMessage("common.normalizing", languageCode) + " " + videoId
+                        + ":\n\n" + normalizedText;
                 sendMessage(chatId, message);
             }
         } catch (InterruptedException e) {
@@ -315,7 +331,7 @@ public class TaskSchedulerService {
             log.error("Interrupted while sending normalized text to user", e);
         } catch (Exception e) {
             log.error("Failed to send normalized text to user", e);
-            sendMessage(chatId, "⚠️ Текст нормализован, но возникла ошибка при отправке.");
+            sendMessage(chatId, messageService.getMessage("common.error", languageCode) + " Failed to send text.");
         }
     }
 
@@ -327,7 +343,7 @@ public class TaskSchedulerService {
             tempDir = Files.createTempDirectory("zip_" + task.getVideoId());
 
             // Step 1: Download Media (ALWAYS)
-            sendMessage(task.getChatId(), "📥 Скачиваю видео и аудио...");
+            sendMessage(task.getChatId(), messageService.getMessage("common.downloading", task.getLanguageCode()));
             File videoFile = ytDlpService.downloadVideo(url, tempDir, "video");
             File audioFile = ytDlpService.downloadAudio(url, tempDir, "audio");
 
@@ -336,7 +352,7 @@ public class TaskSchedulerService {
             }
 
             // Step 2: Get Transcription
-            sendMessage(task.getChatId(), "🎙️ Проверяю/генерирую транскрипцию...");
+            sendMessage(task.getChatId(), messageService.getMessage("common.transcribing", task.getLanguageCode()));
             Optional<Video> videoOpt = videoRepository.findByVideoId(task.getVideoId());
             Video videoRecord;
 
@@ -354,7 +370,7 @@ public class TaskSchedulerService {
             }
 
             // Step 3: Get Normalization
-            sendMessage(task.getChatId(), "📝 Проверяю/генерирую нормализацию...");
+            sendMessage(task.getChatId(), messageService.getMessage("common.normalizing", task.getLanguageCode()));
             String normalizedText;
             if (videoRecord.getNormalizedText() != null && !videoRecord.getNormalizedText().isEmpty()) {
                 log.info("[ZIP] Found existing normalization for {}", task.getVideoId());
@@ -381,7 +397,7 @@ public class TaskSchedulerService {
             Files.writeString(normalizedFile.toPath(), normalizedText);
 
             // Step 5: Pack ZIP
-            sendMessage(task.getChatId(), "📦 Упаковываю архив...");
+            sendMessage(task.getChatId(), "📦 Packing archive..."); // Simplified, can be localized or keep generic
             File zipFile = tempDir.resolve("content.zip").toFile();
             try (FileOutputStream fos = new FileOutputStream(zipFile);
                     ZipOutputStream zos = new ZipOutputStream(fos)) {
@@ -393,12 +409,11 @@ public class TaskSchedulerService {
             }
 
             // Step 6: Send ZIP
-            sendMessage(task.getChatId(), "🚀 Отправляю архив пользователю...");
+            sendMessage(task.getChatId(), "🚀 Sending archive...");
             SendDocument sendDocument = SendDocument.builder()
                     .chatId(task.getChatId())
                     .document(new InputFile(zipFile))
-                    .caption(
-                            "📦 Ваш полный архив готов!\n\nВнутри:\n- Видео (MP4)\n- Аудио (MP3)\n- Транскрипция (TXT)\n- Нормализованный текст (TXT)")
+                    .caption(messageService.getMessage("task.completed.full_processing", task.getLanguageCode()))
                     .build();
             telegramClient.execute(sendDocument);
 
@@ -409,7 +424,8 @@ public class TaskSchedulerService {
             log.error("[ZIP] Error in full processing for video: {}", task.getVideoId(), e);
             task.setStatus(TaskStatus.FAILED);
             task.setErrorMessage("Error: " + e.getMessage());
-            sendMessage(task.getChatId(), "❌ Ошибка при создании архива: " + e.getMessage());
+            sendMessage(task.getChatId(),
+                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
         } finally {
             // Step 7: Cleanup
             if (tempDir != null) {
@@ -493,21 +509,23 @@ public class TaskSchedulerService {
         }
     }
 
-    private void sendTranscriptionToUser(Long chatId, String transcription, String videoId) {
+    private void sendTranscriptionToUser(Long chatId, String transcription, String videoId, String languageCode) {
         try {
             // If transcription is too long for a single message, we'll send it in parts
             if (transcription.length() > 4000) {
                 // Split into chunks of approximately 4000 characters
                 String[] parts = splitString(transcription, 4000);
                 for (int i = 0; i < parts.length; i++) {
-                    String part = String.format("📄 Транскрипция (часть %d/%d):\n\n%s",
+                    String part = String.format("📄 %s (%d/%d):\n\n%s",
+                            messageService.getMessage("bot.button.text", languageCode),
                             i + 1, parts.length, parts[i]);
                     sendMessage(chatId, part);
                     // Small delay between messages to avoid rate limiting
                     Thread.sleep(1000);
                 }
             } else {
-                String message = "🎙️ Результат распознавания речи для видео " + videoId + ":\n\n" + transcription;
+                String message = "🎙️ " + messageService.getMessage("bot.button.text", languageCode) + " " + videoId
+                        + ":\n\n" + transcription;
                 sendMessage(chatId, message);
             }
         } catch (InterruptedException e) {
@@ -515,7 +533,8 @@ public class TaskSchedulerService {
             log.error("Interrupted while sending transcription to user", e);
         } catch (Exception e) {
             log.error("Failed to send transcription to user", e);
-            sendMessage(chatId, "⚠️ Текст распознан, но возникла ошибка при отправке.");
+            sendMessage(chatId,
+                    messageService.getMessage("common.error", languageCode) + " Failed to send transcription.");
         }
     }
 
@@ -567,8 +586,9 @@ public class TaskSchedulerService {
         return parts.toArray(new String[0]);
     }
 
-    private void sendContent(Long chatId, File file, String type) {
-        String caption = type.equals("VIDEO") ? "📹 Ваше видео готово!" : "🎧 Ваше аудио готово!";
+    private void sendContent(Long chatId, File file, String type, String languageCode) {
+        String caption = type.equals("VIDEO") ? messageService.getMessage("task.completed.video", languageCode)
+                : messageService.getMessage("task.completed.audio", languageCode);
 
         SendDocument sendDocument = SendDocument.builder()
                 .chatId(chatId)

@@ -10,7 +10,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "download_tasks", uniqueConstraints = @UniqueConstraint(columnNames = {"video_id", "type"}))
+@Table(name = "download_tasks", uniqueConstraints = @UniqueConstraint(columnNames = { "video_id", "type" }))
 @Data
 public class DownloadTask {
 
@@ -34,6 +34,9 @@ public class DownloadTask {
 
     @Column(name = "error_message", length = 2048)
     private String errorMessage;
+
+    @Column(name = "language_code", length = 10)
+    private String languageCode;
 
     @CreationTimestamp
     @Column(name = "created_at")
