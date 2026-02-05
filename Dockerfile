@@ -1,18 +1,12 @@
-# Используем JDK 17
+# Dockerfile
 FROM eclipse-temurin:17-jdk-jammy
-
-# Создаём рабочую директорию
 WORKDIR /app
 
-# Копируем jar-файл (предварительно собранный через Maven/Gradle)
+# Копируем jar и конфиг из корня репозитория
 COPY target/youtubelizer.jar /app/youtubelizer.jar
+COPY application.properties /app/config/application.properties
 
-# Копируем конфиг
-COPY config/application.properties /app/config/application.properties
-
-# Экспонируем порты приложения
 EXPOSE 8080
 EXPOSE 8081
 
-# Команда запуска
 ENTRYPOINT ["java", "-jar", "/app/youtubelizer.jar"]
