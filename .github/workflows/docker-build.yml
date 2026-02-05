@@ -43,4 +43,5 @@ jobs:
 
       # 6. Пушим Docker image на Docker Hub
       - name: Push Docker image
-        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/y_
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/youtubelizer:latest
