@@ -1,0 +1,8 @@
+- name: Build Docker image
+  run: |
+    # находим jar в target
+    JAR=$(ls target/*.jar | head -n 1)
+    echo "Using jar: $JAR"
+    docker build \
+      --build-arg JAR_FILE=$JAR \
+      -t ${{ secrets.DOCKERHUB_USERNAME }}/youtubelizer:latest .
