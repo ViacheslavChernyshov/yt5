@@ -10,9 +10,9 @@ services:
     environment:
       SERVER_PORT: 8080
       # База данных
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/youtubelizer_db
-      SPRING_DATASOURCE_USERNAME: youtubelizer
-      SPRING_DATASOURCE_PASSWORD: youtubelizer
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       # Пути к инструментам (установлены в Dockerfile)
       APP_YTDLP_PATH: /usr/local/bin/yt-dlp
       APP_FFMPEG_PATH: /usr/bin/ffmpeg
@@ -36,9 +36,9 @@ services:
     container_name: youtubelizer-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: youtubelizer_db
-      POSTGRES_USER: youtubelizer
-      POSTGRES_PASSWORD: youtubelizer
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
