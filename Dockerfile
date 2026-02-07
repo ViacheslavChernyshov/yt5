@@ -8,10 +8,11 @@ RUN mvn clean package -DskipTests
 # Stage 2: Build Whisper.cpp
 FROM ubuntu:22.04 AS whisper-build
 WORKDIR /build
-RUN apt-get update && apt-get install -y git build-essential
+RUN apt-get update && apt-get install -y git build-essential cmake
 RUN git clone https://github.com/ggerganov/whisper.cpp.git
 WORKDIR /build/whisper.cpp
-RUN make
+RUN cmake -B build
+RUN cmake --build build --config Release -j
 
 # Stage 3: Build Llama.cpp
 FROM ubuntu:22.04 AS llama-build
@@ -42,7 +43,7 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 COPY --from=build /app/target/*.jar app.jar
 
 # Копируем Whisper
-COPY --from=whisper-build /build/whisper.cpp/main /usr/local/bin/whisper
+COPY --from=whisper-build /build/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper
 RUN chmod +x /usr/local/bin/whisper
 
 # Копируем Llama Server
