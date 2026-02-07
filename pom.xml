@@ -57,7 +57,8 @@
 				<artifactId>telegrambots-client</artifactId>
 				<version>9.2.1</version>
 			</dependency>
-	
+
+
 			<dependency>
 				<groupId>org.projectlombok</groupId>
 				<artifactId>lombok</artifactId>
