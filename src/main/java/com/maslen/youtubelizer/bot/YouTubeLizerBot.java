@@ -240,33 +240,32 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
         String actionName = "";
         String responseText = "";
-        boolean shouldProceed = true;
 
         switch (action) {
             case "download_video":
                 actionName = messageService.getMessage("bot.button.video", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.VIDEO, languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.VIDEO, languageCode);
                 break;
             case "download_audio":
                 actionName = messageService.getMessage("bot.button.audio", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.AUDIO, languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.AUDIO, languageCode);
                 break;
             case "speech_recognition":
                 actionName = messageService.getMessage("bot.button.text", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION, languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION, languageCode);
                 break;
             case "normalize_text":
                 actionName = messageService.getMessage("common.normalizing", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION, languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION, languageCode);
                 break;
             case "process_all_zip":
                 actionName = messageService.getMessage("bot.button.zip", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
+                queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
                 break;
             case "donate":
                 handleDonateCallback(chatId, messageId, videoId, languageCode, callbackQuery.getId());
@@ -274,19 +273,6 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             default:
                 actionName = messageService.getMessage("error.unknown", languageCode);
                 responseText = messageService.getMessage("error.unknown", languageCode);
-        }
-
-        if (!shouldProceed) {
-            try {
-                telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
-                        .callbackQueryId(callbackQuery.getId())
-                        .text(messageService.getMessage("bot.task_already_exists", languageCode))
-                        .showAlert(false)
-                        .build());
-            } catch (TelegramApiException e) {
-                log.error("[BOT] Не удалось ответить на callback query (duplicate): {}", e.getMessage(), e);
-            }
-            return;
         }
 
         // Отправка ответа пользователю
@@ -319,10 +305,27 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     private boolean queueDownloadTask(long chatId, String videoId, TaskType type, String languageCode) {
-        if (downloadTaskRepository.existsByVideoIdAndType(videoId, type)) {
-            log.warn("Task already exists for videoId: {} and type: {}", videoId, type);
-            return false;
+        java.util.Optional<DownloadTask> existingTaskOpt = downloadTaskRepository.findByVideoIdAndType(videoId, type);
+
+        if (existingTaskOpt.isPresent()) {
+            DownloadTask existingTask = existingTaskOpt.get();
+            log.info("Found existing task for videoId: {}, type: {}. Status: {}", videoId, type, existingTask.getStatus());
+            
+            // Update chat ID and language to the latest request
+            existingTask.setChatId(chatId);
+            existingTask.setLanguageCode(languageCode);
+            
+            // If the task was completed or failed, restart it
+            if (existingTask.getStatus() == TaskStatus.COMPLETED || existingTask.getStatus() == TaskStatus.FAILED) {
+                log.info("Restarting task for videoId: {}, type: {}", videoId, type);
+                existingTask.setStatus(TaskStatus.PENDING);
+                existingTask.setErrorMessage(null);
+            }
+            
+            downloadTaskRepository.save(existingTask);
+            return true;
         }
+
         DownloadTask task = new DownloadTask();
         task.setChatId(chatId);
         task.setVideoId(videoId);
