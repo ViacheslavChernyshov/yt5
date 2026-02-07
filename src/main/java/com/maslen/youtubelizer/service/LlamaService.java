@@ -37,7 +37,8 @@ public class LlamaService {
     @Value("${app.llama.threads:20}")
     private int threads;
 
-    private static final String LLAMA_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-win-vulkan-x64.zip";
+    private static final String LLAMA_WINDOWS_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-win-vulkan-x64.zip";
+    private static final String LLAMA_LINUX_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip";
     private static final String MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q3_k_m.gguf";
 
     private Process serverProcess;
@@ -64,6 +65,14 @@ public class LlamaService {
             Исправленный текст:
             """;
 
+    private static boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase().contains("win");
+    }
+
+    private String getLlamaDownloadUrl() {
+        return isWindows() ? LLAMA_WINDOWS_URL : LLAMA_LINUX_URL;
+    }
+
     public void ensureAvailable() throws IOException {
         Path exePath = Paths.get(llamaPath);
         Path modelFilePath = Paths.get(modelPath);
@@ -71,14 +80,20 @@ public class LlamaService {
         // Download llama.cpp if missing
         if (Files.notExists(exePath)) {
              if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
-                log.info("[LLAMA] Скачивание llama.cpp...");
-                DownloadHelper.downloadAndExtractZip(LLAMA_URL, exePath.getParent(), "Llama.cpp");
-                exePath.toFile().setExecutable(true);
+                log.info("[LLAMA] Скачивание llama.cpp для {}...", isWindows() ? "Windows" : "Linux");
+                DownloadHelper.downloadAndExtractZip(getLlamaDownloadUrl(), exePath.getParent(), "Llama.cpp");
+                if (!isWindows()) {
+                    exePath.toFile().setExecutable(true);
+                }
              } else {
                 log.warn("[LLAMA] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", llamaPath);
              }
         } else {
             log.info("[LLAMA] Найден: {}", llamaPath);
+            if (!isWindows() && !Files.isExecutable(exePath)) {
+                log.warn("[LLAMA] Файл не имеет прав на выполнение, пытаемся исправить...");
+                exePath.toFile().setExecutable(true);
+            }
         }
 
         // Download model if missing

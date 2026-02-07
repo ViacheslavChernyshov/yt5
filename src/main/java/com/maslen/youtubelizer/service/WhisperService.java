@@ -29,8 +29,17 @@ public class WhisperService {
     @Value("${app.whisper.threads:4}")
     private int threads;
 
-    private static final String WHISPER_URL = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.2/whisper-cublas-12.4.0-bin-x64.zip";
+    private static final String WHISPER_WINDOWS_URL = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.2/whisper-cublas-12.4.0-bin-x64.zip";
+    private static final String WHISPER_LINUX_URL = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.2/whisper-blas-bin-x64.zip";
     private static final String MODEL_DOWNLOAD_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase().contains("win");
+    }
+
+    private String getWhisperDownloadUrl() {
+        return isWindows() ? WHISPER_WINDOWS_URL : WHISPER_LINUX_URL;
+    }
 
     public void ensureAvailable() throws IOException {
         Path exePath = Paths.get(whisperPath);
@@ -41,15 +50,17 @@ public class WhisperService {
             // Если путь абсолютный и в системе (например /usr/local/bin), мы не можем его просто скачать
             // Но если это локальный путь (например ./whisper/...), попробуем скачать
             if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
-                 log.info("[WHISPER] Скачивание Whisper...");
-                 DownloadHelper.downloadAndExtractZip(WHISPER_URL, exePath.getParent(), "Whisper");
-                 exePath.toFile().setExecutable(true);
+                 log.info("[WHISPER] Скачивание Whisper для {}...", isWindows() ? "Windows" : "Linux");
+                 DownloadHelper.downloadAndExtractZip(getWhisperDownloadUrl(), exePath.getParent(), "Whisper");
+                 if (!isWindows()) {
+                     exePath.toFile().setExecutable(true);
+                 }
             } else {
                  log.warn("[WHISPER] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", whisperPath);
             }
         } else {
             log.info("[WHISPER] Найден: {}", whisperPath);
-            if (!Files.isExecutable(exePath)) {
+            if (!isWindows() && !Files.isExecutable(exePath)) {
                  log.warn("[WHISPER] Файл не имеет прав на выполнение, пытаемся исправить...");
                  exePath.toFile().setExecutable(true);
             }
