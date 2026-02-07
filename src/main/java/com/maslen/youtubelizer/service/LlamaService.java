@@ -70,9 +70,13 @@ public class LlamaService {
 
         // Download llama.cpp if missing
         if (Files.notExists(exePath)) {
-            log.info("[LLAMA] Скачивание llama.cpp...");
-            DownloadHelper.downloadAndExtractZip(LLAMA_URL, exePath.getParent(), "Llama.cpp");
-            exePath.toFile().setExecutable(true);
+             if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
+                log.info("[LLAMA] Скачивание llama.cpp...");
+                DownloadHelper.downloadAndExtractZip(LLAMA_URL, exePath.getParent(), "Llama.cpp");
+                exePath.toFile().setExecutable(true);
+             } else {
+                log.warn("[LLAMA] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", llamaPath);
+             }
         } else {
             log.info("[LLAMA] Найден: {}", llamaPath);
         }

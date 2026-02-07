@@ -36,13 +36,23 @@ public class WhisperService {
         Path exePath = Paths.get(whisperPath);
         Path modelFilePath = Paths.get(modelPath);
 
-        // Download binary if missing
+        // Check availability of binary
         if (Files.notExists(exePath)) {
-            log.info("[WHISPER] Скачивание Whisper...");
-            DownloadHelper.downloadAndExtractZip(WHISPER_URL, exePath.getParent(), "Whisper");
-            exePath.toFile().setExecutable(true);
+            // Если путь абсолютный и в системе (например /usr/local/bin), мы не можем его просто скачать
+            // Но если это локальный путь (например ./whisper/...), попробуем скачать
+            if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
+                 log.info("[WHISPER] Скачивание Whisper...");
+                 DownloadHelper.downloadAndExtractZip(WHISPER_URL, exePath.getParent(), "Whisper");
+                 exePath.toFile().setExecutable(true);
+            } else {
+                 log.warn("[WHISPER] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", whisperPath);
+            }
         } else {
             log.info("[WHISPER] Найден: {}", whisperPath);
+            if (!Files.isExecutable(exePath)) {
+                 log.warn("[WHISPER] Файл не имеет прав на выполнение, пытаемся исправить...");
+                 exePath.toFile().setExecutable(true);
+            }
         }
 
         // Download model if missing
