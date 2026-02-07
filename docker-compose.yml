@@ -20,6 +20,8 @@ services:
       APP_DOWNLOAD_PATH: /app/downloads
       APP_WHISPER_PATH: /app/whisper
       APP_LLAMA_PATH: /app/llama
+      APP_WHISPER_MODEL_PATH: /app/whisper/ggml-large-v3.bin
+      APP_LLAMA_MODEL_PATH: /app/llama/ggml-model-q4_k_m.gguf
       # Токен (должен быть передан извне)
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     volumes:
