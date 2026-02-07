@@ -10,6 +10,8 @@ import java.util.Optional;
 @Repository
 public interface DownloadTaskRepository extends JpaRepository<DownloadTask, Long> {
     Optional<DownloadTask> findTopByStatusOrderByCreatedAtAsc(TaskStatus status);
+
+    boolean existsByVideoIdAndType(String videoId, com.maslen.youtubelizer.model.TaskType type);
     
     java.util.List<DownloadTask> findByStatusAndUpdatedAtBefore(TaskStatus status, java.time.LocalDateTime dateTime);
 }

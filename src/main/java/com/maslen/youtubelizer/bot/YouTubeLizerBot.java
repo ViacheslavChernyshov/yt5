@@ -123,10 +123,10 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
                     sendMessageWithKeyboard(
                             chatId, messageService.getMessage("bot.select_action", languageCode) + "\n" +
-                                    "Video ID: " + videoId + "\n" +
-                                    "Channel: "
+                                    messageService.getMessage("common.video_id", languageCode) + ": " + videoId + "\n" +
+                                    messageService.getMessage("common.channel", languageCode) + ": "
                                     + (channel.getChannelTitle() != null ? channel.getChannelTitle()
-                                            : "Unknown channel"),
+                                            : messageService.getMessage("common.unknown_channel", languageCode)),
                             videoId, languageCode);
 
                 } catch (Exception e) {
@@ -240,38 +240,53 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
         String actionName = "";
         String responseText = "";
+        boolean shouldProceed = true;
+
         switch (action) {
             case "download_video":
                 actionName = messageService.getMessage("bot.button.video", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                queueDownloadTask(chatId, videoId, TaskType.VIDEO, languageCode);
+                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.VIDEO, languageCode);
                 break;
             case "download_audio":
                 actionName = messageService.getMessage("bot.button.audio", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                queueDownloadTask(chatId, videoId, TaskType.AUDIO, languageCode);
+                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.AUDIO, languageCode);
                 break;
             case "speech_recognition":
                 actionName = messageService.getMessage("bot.button.text", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION, languageCode);
+                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.SPEECH_RECOGNITION, languageCode);
                 break;
             case "normalize_text":
                 actionName = messageService.getMessage("common.normalizing", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION, languageCode);
+                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.TEXT_NORMALIZATION, languageCode);
                 break;
             case "process_all_zip":
                 actionName = messageService.getMessage("bot.button.zip", languageCode);
                 responseText = messageService.getMessage("bot.task_scheduled", languageCode);
-                queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
+                shouldProceed = queueDownloadTask(chatId, videoId, TaskType.FULL_PROCESSING_ZIP, languageCode);
                 break;
             case "donate":
                 handleDonateCallback(chatId, messageId, videoId, languageCode, callbackQuery.getId());
                 return; // Early return, handled separately
             default:
-                actionName = "Unknown action";
-                responseText = "Unknown command";
+                actionName = messageService.getMessage("error.unknown", languageCode);
+                responseText = messageService.getMessage("error.unknown", languageCode);
+        }
+
+        if (!shouldProceed) {
+            try {
+                telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
+                        .callbackQueryId(callbackQuery.getId())
+                        .text(messageService.getMessage("bot.task_already_exists", languageCode))
+                        .showAlert(false)
+                        .build());
+            } catch (TelegramApiException e) {
+                log.error("[BOT] Не удалось ответить на callback query (duplicate): {}", e.getMessage(), e);
+            }
+            return;
         }
 
         // Отправка ответа пользователю
@@ -303,7 +318,11 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         }
     }
 
-    private void queueDownloadTask(long chatId, String videoId, TaskType type, String languageCode) {
+    private boolean queueDownloadTask(long chatId, String videoId, TaskType type, String languageCode) {
+        if (downloadTaskRepository.existsByVideoIdAndType(videoId, type)) {
+            log.warn("Task already exists for videoId: {} and type: {}", videoId, type);
+            return false;
+        }
         DownloadTask task = new DownloadTask();
         task.setChatId(chatId);
         task.setVideoId(videoId);
@@ -312,6 +331,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         task.setLanguageCode(languageCode);
         downloadTaskRepository.save(task);
         log.info("Task queued: videoId={}, type={}, lang={}", videoId, type, languageCode);
+        return true;
     }
 
     /**
@@ -394,14 +414,14 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         try {
             int amount = Integer.parseInt(text.trim());
             if (amount < 1 || amount > 2500) {
-                sendMessage(chatId, "⚠️ Please enter a number between 1 and 2500");
+                sendMessage(chatId, messageService.getMessage("donation.invalid_amount", savedLanguageCode));
                 pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
                 return true;
             }
 
             taskSchedulerService.sendDonationInvoice(chatId, amount, savedLanguageCode);
         } catch (NumberFormatException e) {
-            sendMessage(chatId, "⚠️ Please enter a valid number");
+            sendMessage(chatId, messageService.getMessage("donation.enter_valid_number", savedLanguageCode));
             pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
         }
 

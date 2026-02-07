@@ -404,7 +404,7 @@ public class TaskSchedulerService {
             Files.writeString(normalizedFile.toPath(), normalizedText);
 
             // Step 5: Pack ZIP
-            sendMessage(task.getChatId(), "📦 Packing archive..."); // Simplified, can be localized or keep generic
+            sendMessage(task.getChatId(), messageService.getMessage("common.packing", task.getLanguageCode()));
             File zipFile = tempDir.resolve("content.zip").toFile();
             try (FileOutputStream fos = new FileOutputStream(zipFile);
                     ZipOutputStream zos = new ZipOutputStream(fos)) {
@@ -416,11 +416,11 @@ public class TaskSchedulerService {
             }
 
             // Step 6: Send ZIP
-            sendMessage(task.getChatId(), "🚀 Sending archive...");
+            sendMessage(task.getChatId(), messageService.getMessage("common.sending", task.getLanguageCode()));
             SendDocument sendDocument = SendDocument.builder()
                     .chatId(task.getChatId())
                     .document(new InputFile(zipFile))
-                    .caption(messageService.getMessage("task.completed.full_processing", task.getLanguageCode()))
+                    .caption(messageService.getMessage("task.completed.full_processing_caption", task.getLanguageCode()))
                     .build();
             telegramClient.execute(sendDocument);
 
