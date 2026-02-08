@@ -26,16 +26,20 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
     && chmod a+rx /usr/local/bin/yt-dlp
 
 # Скачивание и установка Whisper для Linux
-RUN mkdir -p /tmp/whisper_download && cd /tmp/whisper_download \
-    && curl -L https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip -o whisper.zip \
-    && unzip -q whisper.zip \
-    && find . -type f -executable -name 'whisper*' | head -1 | xargs -I {} cp {} /app/whisper/whisper-cli \
-    && chmod a+x /app/whisper/whisper-cli \
-    && cd / && rm -rf /tmp/whisper_download
+RUN mkdir -p /tmp/whisper_download && cd /tmp/whisper_download && \
+    curl -L https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip -o whisper.zip && \
+    unzip -q whisper.zip && \
+    cp ./whisper /app/whisper/whisper-cli && \
+    chmod a+x /app/whisper/whisper-cli && \
+    cd / && rm -rf /tmp/whisper_download
 
-# Скачивание Whisper-модели
-RUN mkdir -p /app/whisper/models && cd /app/whisper/models \
-    && curl -L -o ggml-large-v3.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+# Скачивание и установка Llama для Linux
+RUN mkdir -p /tmp/llama_download && cd /tmp/llama_download && \
+    curl -L https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip -o llama.zip && \
+    unzip -q llama.zip && \
+    cp ./main /app/llama/main && \
+    chmod a+x /app/llama/main && \
+    cd / && rm -rf /tmp/llama_download
 
 # Копируем JAR из стадии сборки
 COPY --from=build /app/target/*.jar app.jar
