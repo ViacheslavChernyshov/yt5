@@ -32,13 +32,27 @@ RUN mkdir -p /app/downloads /app/llama /app/llama/models /app/whisper /app/whisp
 # Install Whisper via Python package (more reliable than binary)
 RUN pip3 install openai-whisper
 
-# Download Llama.cpp binary for Linux
-RUN cd /tmp && \
-    curl -fL https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip -o llama.zip && \
-    unzip -q llama.zip && \
-    find . -name "main" -type f -exec cp {} /app/llama/main \; && \
-    chmod a+x /app/llama/main && \
-    rm -rf /tmp/llama.zip /tmp/artifacts
+# Try to download Llama.cpp binary, but don't fail if it doesn't work
+# The application can still run if llama binary is missing (graceful degradation)
+RUN mkdir -p /tmp/llama_extract && cd /tmp/llama_extract && \
+    echo "Attempting to download Llama.cpp binary..." && \
+    if curl -fSL --max-time 120 --retry 2 https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip -o llama.zip; then \
+        echo "Downloaded successfully, extracting..."; \
+        if unzip -q llama.zip 2>/dev/null; then \
+            echo "Extracted, searching for executable..."; \
+            if find . -type f -executable ! -name "*.so*" -print | head -1 | xargs -I {} cp {} /app/llama/main 2>/dev/null; then \
+                chmod a+x /app/llama/main; \
+                echo "Llama binary installed successfully"; \
+            else \
+                echo "Warning: No executable found in archive, skipping binary installation"; \
+            fi; \
+        else \
+            echo "Warning: Failed to extract llama.zip"; \
+        fi; \
+    else \
+        echo "Warning: Failed to download Llama binary, will use CPU-only mode"; \
+    fi; \
+    rm -rf /tmp/llama_extract
 
 # Копируем JAR из стадии сборки
 COPY --from=build /app/target/*.jar app.jar

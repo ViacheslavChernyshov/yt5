@@ -119,33 +119,40 @@ public class LlamaService {
      */
     public synchronized void ensureServerRunning() throws IOException, InterruptedException {
         if (isServerRunning()) {
-            log.debug("[LLAMA] Сервер уже запущен на порту {}", serverPort);
+            log.debug("[LLAMA] Server already running on port {}", serverPort);
             return;
         }
 
         if (serverStarting) {
-            log.info("[LLAMA] Сервер запускается, ожидание...");
+            log.info("[LLAMA] Server is starting, waiting...");
             waitForServer(60);
             return;
         }
 
+        // Check if binary exists before attempting to start
+        Path exePath = Paths.get(llamaPath);
+        if (Files.notExists(exePath)) {
+            throw new IOException("[LLAMA] Binary not found at: " + llamaPath + 
+                ". Please install llama.cpp or provide the binary path.");
+        }
+
         serverStarting = true;
         try {
-            log.info("[LLAMA] Запуск llama-server на порту {}...", serverPort);
+            log.info("[LLAMA] Starting llama-server on port {}...", serverPort);
 
             ProcessBuilder pb = new ProcessBuilder(
                     llamaPath,
                     "-m", modelPath,
                     "--port", String.valueOf(serverPort),
                     "--host", "0.0.0.0",
-                    "-c", "4096", // размер контекста
-                    "-t", String.valueOf(threads) // Потоки CPU (20 по умолчанию)
+                    "-c", "4096",
+                    "-t", String.valueOf(threads)
             );
 
             pb.redirectErrorStream(true);
             serverProcess = pb.start();
 
-            // Читаем логи сервера в отдельном потоке
+            // Read server logs in a separate thread
             Thread logReader = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(serverProcess.getInputStream()))) {
@@ -154,18 +161,18 @@ public class LlamaService {
                         log.debug("[LLAMA-SERVER] {}", line);
                     }
                 } catch (IOException e) {
-                    log.error("[LLAMA] Ошибка чтения вывода сервера", e);
+                    log.error("[LLAMA] Error reading server output", e);
                 }
             });
             logReader.setDaemon(true);
             logReader.start();
 
-            // Ждём пока сервер запустится
+            // Wait for server to start
             if (!waitForServer(120)) {
-                throw new IOException("llama-server не смог запуститься в течение 120 секунд");
+                throw new IOException("llama-server failed to start within 120 seconds");
             }
 
-            log.info("[LLAMA] Сервер успешно запущен на порту {}", serverPort);
+            log.info("[LLAMA] Server successfully started on port {}", serverPort);
         } finally {
             serverStarting = false;
         }
