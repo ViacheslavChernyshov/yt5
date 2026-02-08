@@ -5,23 +5,18 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# Stage 2: Source Llama.cpp binaries
-FROM ghcr.io/ggml-org/llama.cpp:server AS llama-source
-
-# Stage 3: Source Whisper.cpp binaries
-FROM ghcr.io/ggml-org/whisper.cpp:main AS whisper-source
-
-# Stage 4: Runtime
+# Stage 2: Runtime
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
 # Установка зависимостей (ffmpeg, python для yt-dlp)
-# Бинарники llama/whisper могут требовать libgomp1 и libcurl4
+# Также ставим libgomp1 и libcurl4 для работы бинарников llama/whisper
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
     python3-pip \
     curl \
+    unzip \
     libgomp1 \
     libcurl4 \
     && rm -rf /var/lib/apt/lists/*
@@ -30,17 +25,12 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp
 
-# Копируем бинарники из официальных образов
-COPY --from=llama-source /app/llama-server /usr/local/bin/llama-server
-COPY --from=whisper-source /app/whisper-cli /usr/local/bin/whisper
-
-RUN chmod +x /usr/local/bin/llama-server /usr/local/bin/whisper
-
 # Копируем JAR из стадии сборки
 COPY --from=build /app/target/*.jar app.jar
 
-# Создаем директории для данных (модели)
-RUN mkdir -p /app/downloads /app/llama /app/whisper
+# Создаем директории для данных (модели и бинарники)
+# Права на запись важны, так как Java будет скачивать сюда файлы
+RUN mkdir -p /app/downloads /app/llama /app/whisper && chmod -R 777 /app
 
 EXPOSE 8080
 

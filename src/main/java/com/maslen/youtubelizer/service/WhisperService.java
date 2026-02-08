@@ -29,8 +29,8 @@ public class WhisperService {
     @Value("${app.whisper.threads:4}")
     private int threads;
 
-    private static final String WHISPER_WINDOWS_URL = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.2/whisper-cublas-12.4.0-bin-x64.zip";
-    private static final String WHISPER_LINUX_URL = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.2/whisper-blas-bin-x64.zip";
+    private static final String WHISPER_WINDOWS_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
+    private static final String WHISPER_LINUX_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
     private static final String MODEL_DOWNLOAD_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
 
     private static boolean isWindows() {
