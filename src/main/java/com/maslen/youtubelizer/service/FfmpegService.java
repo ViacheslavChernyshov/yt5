@@ -34,6 +34,12 @@ public class FfmpegService {
         log.info("[FFMPEG] Initialized path: {}", ffmpegPath);
     }
 
+    public void ensureAvailable() throws IOException {
+        // Path is configured via environment variables or defaults
+        // FFmpeg is installed in Docker, no need to download
+        log.info("[FFMPEG] Using configured path: {}", ffmpegPath);
+    }
+
     private void download() throws IOException {
         Path target = Paths.get(ffmpegPath);
         Files.createDirectories(target.getParent());

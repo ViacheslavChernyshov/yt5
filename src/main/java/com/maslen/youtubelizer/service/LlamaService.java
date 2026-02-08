@@ -92,10 +92,6 @@ public class LlamaService {
             Исправленный текст:
             """;
 
-    private static boolean isWindows() {
-        return System.getProperty("os.name").toLowerCase().contains("win");
-    }
-
     private String getLlamaDownloadUrl() {
         return isWindows() ? LLAMA_WINDOWS_URL : LLAMA_LINUX_URL;
     }

@@ -32,6 +32,12 @@ public class YtDlpService {
         log.info("[YTDLP] Initialized path: {}", ytDlpPath);
     }
 
+    public void ensureAvailable() throws IOException {
+        // Path is configured via environment variables or defaults
+        // No need to download in Docker environment
+        log.info("[YTDLP] Using configured path: {}", ytDlpPath);
+    }
+
     public java.io.File downloadVideo(String url, Path outputDir, String fileNameWithoutExt)
             throws IOException, InterruptedException {
         Files.createDirectories(outputDir);
