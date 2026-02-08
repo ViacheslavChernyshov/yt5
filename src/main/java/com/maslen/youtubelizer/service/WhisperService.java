@@ -1,6 +1,5 @@
 package com.maslen.youtubelizer.service;
 
-import com.maslen.youtubelizer.util.DownloadHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -29,10 +28,6 @@ public class WhisperService {
 
     @Value("${app.whisper.threads:4}")
     private int threads;
-
-    private static final String WHISPER_WINDOWS_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
-    private static final String WHISPER_LINUX_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
-    private static final String MODEL_DOWNLOAD_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
 
     @PostConstruct
     private void initializePaths() {
@@ -66,67 +61,38 @@ public class WhisperService {
         return System.getProperty("os.name").toLowerCase().contains("win");
     }
 
-    private String getWhisperDownloadUrl() {
-        return isWindows() ? WHISPER_WINDOWS_URL : WHISPER_LINUX_URL;
-    }
-
     public void ensureAvailable() throws IOException {
         Path exePath = Paths.get(whisperPath);
         Path modelFilePath = Paths.get(modelPath);
 
-        // Check availability of binary
-        if (Files.notExists(exePath)) {
-            // Если путь абсолютный и в системе (например /usr/local/bin), мы не можем его просто скачать
-            // Но если это локальный путь (например ./whisper/...), попробуем скачать
-            if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
-                 log.info("[WHISPER] Скачивание Whisper для {}...", isWindows() ? "Windows" : "Linux");
-                 DownloadHelper.downloadAndExtractZip(getWhisperDownloadUrl(), exePath.getParent(), "Whisper");
-                 if (!isWindows()) {
-                     exePath.toFile().setExecutable(true);
-                 }
-            } else {
-                 log.warn("[WHISPER] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", whisperPath);
+        // Only log the paths, no downloading
+        if (Files.exists(exePath)) {
+            log.info("[WHISPER] Binary found at: {}", whisperPath);
+            if (!isWindows() && !Files.isExecutable(exePath)) {
+                log.warn("[WHISPER] Binary exists but is not executable, setting permissions...");
+                exePath.toFile().setExecutable(true);
             }
         } else {
-            log.info("[WHISPER] Найден: {}", whisperPath);
-            if (!isWindows() && !Files.isExecutable(exePath)) {
-                 log.warn("[WHISPER] Файл не имеет прав на выполнение, пытаемся исправить...");
-                 exePath.toFile().setExecutable(true);
-            }
+            log.error("[WHISPER] Binary not found at: {}. Please ensure it's installed.", whisperPath);
         }
 
-        // Download model if missing
-        if (Files.notExists(modelFilePath)) {
-            log.info("[WHISPER] Скачивание модели ggml-large-v3...");
-            DownloadHelper.downloadWithProgress(MODEL_DOWNLOAD_URL, modelFilePath, "Модель Whisper");
-        } else {
-            log.info("[WHISPER] Модель найдена: {}", modelPath);
-            // Проверка целостности файла модели по размеру
-            File modelFile = new File(modelPath);
-            if (modelFile.length() < 100000000) { // Меньше 100 МБ, скорее всего, неполная загрузка
-                log.warn("[WHISPER] Файл модели слишком мал ({} байт), возможно поврежден", modelFile.length());
+        if (Files.exists(modelFilePath)) {
+            log.info("[WHISPER] Model found at: {}", modelPath);
+            File modelFile = modelFilePath.toFile();
+            if (modelFile.length() < 100000000) {
+                log.warn("[WHISPER] Model file size is suspiciously small ({} bytes)", modelFile.length());
             }
+        } else {
+            log.warn("[WHISPER] Model not found at: {}. Please download it manually.", modelPath);
         }
     }
 
     public boolean isModelValid() {
         Path modelFilePath = Paths.get(modelPath);
         if (Files.notExists(modelFilePath)) {
-            log.warn("[WHISPER] Файл модели не существует: {}", modelPath);
+            log.warn("[WHISPER] Модель не найдена: {}", modelPath);
             return false;
         }
-
-        File modelFile = modelFilePath.toFile();
-        // Базовая валидация: файл модели large-v3 должен быть около 1.8GB для
-        // квантованной версии
-        // Наш файл около 115МБ, проверяем минимальный размер для обнаружения неполных
-        // загрузок
-        if (modelFile.length() < 100000000) { // Меньше 100 МБ
-            log.warn("[WHISPER] Размер файла модели подозрительно мал ({} байт), вероятно поврежден",
-                    modelFile.length());
-            return false;
-        }
-
         return true;
     }
 
@@ -155,18 +121,6 @@ public class WhisperService {
      */
     public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
         log.info("[WHISPER] Начало транскрипции с определением языка для файла: {}", audioFile.getAbsolutePath());
-
-        // Проверяем валидность модели перед продолжением
-        if (!isModelValid()) {
-            log.warn("[WHISPER] Валидация модели не удалась, попытка повторного скачивания...");
-            ensureAvailable(); // Это приведет к повторному скачиванию модели, если она не существует или
-                               // невалидна
-
-            // Повторная проверка после скачивания
-            if (!isModelValid()) {
-                throw new RuntimeException("Модель Whisper все еще невалидна после попытки скачивания");
-            }
-        }
 
         // Создаем временный базовый путь для вывода
         // Создаем временный файл, чтобы получить уникальный путь, затем удаляем его,

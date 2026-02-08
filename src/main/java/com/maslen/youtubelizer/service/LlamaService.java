@@ -1,6 +1,5 @@
 package com.maslen.youtubelizer.service;
 
-import com.maslen.youtubelizer.util.DownloadHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -37,10 +36,6 @@ public class LlamaService {
 
     @Value("${app.llama.threads:20}")
     private int threads;
-
-    private static final String LLAMA_WINDOWS_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-win-vulkan-x64.zip";
-    private static final String LLAMA_LINUX_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip";
-    private static final String MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q3_k_m.gguf";
 
     @PostConstruct
     private void initializePaths() {
@@ -98,39 +93,24 @@ public class LlamaService {
             Исправленный текст:
             """;
 
-    private String getLlamaDownloadUrl() {
-        return isWindows() ? LLAMA_WINDOWS_URL : LLAMA_LINUX_URL;
-    }
-
     public void ensureAvailable() throws IOException {
         Path exePath = Paths.get(llamaPath);
         Path modelFilePath = Paths.get(modelPath);
 
-        // Download llama.cpp if missing
-        if (Files.notExists(exePath)) {
-             if (!exePath.isAbsolute() || exePath.toString().contains("./")) {
-                log.info("[LLAMA] Скачивание llama.cpp для {}...", isWindows() ? "Windows" : "Linux");
-                DownloadHelper.downloadAndExtractZip(getLlamaDownloadUrl(), exePath.getParent(), "Llama.cpp");
-                if (!isWindows()) {
-                    exePath.toFile().setExecutable(true);
-                }
-             } else {
-                log.warn("[LLAMA] Исполняемый файл не найден по пути: {}. Скачивание пропущено, так как это системный путь.", llamaPath);
-             }
-        } else {
-            log.info("[LLAMA] Найден: {}", llamaPath);
+        if (Files.exists(exePath)) {
+            log.info("[LLAMA] Binary found at: {}", llamaPath);
             if (!isWindows() && !Files.isExecutable(exePath)) {
-                log.warn("[LLAMA] Файл не имеет прав на выполнение, пытаемся исправить...");
+                log.warn("[LLAMA] Setting executable permissions...");
                 exePath.toFile().setExecutable(true);
             }
+        } else {
+            log.error("[LLAMA] Binary not found at: {}", llamaPath);
         }
 
-        // Download model if missing
-        if (Files.notExists(modelFilePath)) {
-            log.info("[LLAMA] Скачивание модели Qwen2.5 (это займет несколько минут)...");
-            DownloadHelper.downloadWithProgress(MODEL_URL, modelFilePath, "Модель Qwen");
+        if (Files.exists(modelFilePath)) {
+            log.info("[LLAMA] Model found at: {}", modelPath);
         } else {
-            log.info("[LLAMA] Модель найдена: {}", modelPath);
+            log.warn("[LLAMA] Model not found at: {}", modelPath);
         }
     }
 

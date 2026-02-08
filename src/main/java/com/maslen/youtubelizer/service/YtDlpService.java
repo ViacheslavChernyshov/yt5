@@ -17,8 +17,6 @@ public class YtDlpService {
     @Value("${app.ytdlp.path:}")
     private String ytDlpPath;
 
-    private static final String DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-
     @PostConstruct
     private void initializePath() {
         if (ytDlpPath == null || ytDlpPath.isEmpty()) {
