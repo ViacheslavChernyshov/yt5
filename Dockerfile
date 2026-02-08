@@ -10,15 +10,18 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
 # Установка зависимостей (ffmpeg, python для yt-dlp)
-# Также ставим libgomp1 и libcurl4 для работы бинарников llama/whisper
+# Также ставим build-essential и другие зависимости для компиляции whisper.cpp
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
     python3-pip \
     curl \
     unzip \
+    git \
     libgomp1 \
     libcurl4 \
+    build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка yt-dlp
@@ -31,6 +34,14 @@ COPY --from=build /app/target/*.jar app.jar
 # Создаем директории для данных (модели и бинарники)
 # Права на запись важны, так как Java будет скачивать сюда файлы
 RUN mkdir -p /app/downloads /app/llama /app/whisper && chmod -R 777 /app
+
+# Download and compile Whisper CLI from source
+RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp && \
+    cd /tmp/whisper.cpp && \
+    make && \
+    cp main /app/whisper/whisper-cli && \
+    chmod +x /app/whisper/whisper-cli && \
+    rm -rf /tmp/whisper.cpp
 
 # Set environment variables to point to the correct paths
 # These will be consumed by the Spring application
