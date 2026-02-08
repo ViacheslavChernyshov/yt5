@@ -31,68 +31,30 @@ public class WhisperService {
 
     @PostConstruct
     private void initializePaths() {
-        // Initialize whisper executable path
-        if (whisperPath == null || whisperPath.isEmpty()) {
-            String binaryName = isWindows() ? "whisper-cli.exe" : "whisper-cli";
-            whisperPath = Paths.get("whisper", binaryName).toAbsolutePath().normalize().toString();
-        } else if (!Paths.get(whisperPath).isAbsolute()) {
-            // Convert relative paths to absolute paths relative to application root
-            whisperPath = Paths.get(whisperPath).toAbsolutePath().normalize().toString();
-        } else {
-            // Normalize absolute paths to remove redundant components
-            whisperPath = Paths.get(whisperPath).normalize().toString();
-        }
+        // Use Python's whisper command - installed via pip in Docker
+        // For local development, user must have: pip install openai-whisper
+        whisperPath = "whisper";
         
-        // Initialize model path
+        // Initialize model path (whisper will auto-download if needed)
         if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("whisper", "models", "ggml-large-v3.bin").toAbsolutePath().normalize().toString();
+            modelPath = Paths.get(System.getProperty("user.home"), ".cache", "whisper", "large-v3.pt").toAbsolutePath().normalize().toString();
         } else if (!Paths.get(modelPath).isAbsolute()) {
-            // Convert relative paths to absolute paths relative to application root
             modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
         } else {
-            // Normalize absolute paths to remove redundant components
             modelPath = Paths.get(modelPath).normalize().toString();
         }
         
-        log.info("[WHISPER] Initialized paths - executable: {}, model: {}", whisperPath, modelPath);
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name").toLowerCase().contains("win");
+        log.info("[WHISPER] Using whisper command from PATH, model cache: {}", modelPath);
     }
 
     public void ensureAvailable() throws IOException {
-        Path exePath = Paths.get(whisperPath);
-        Path modelFilePath = Paths.get(modelPath);
-
-        // Only log the paths, no downloading
-        if (Files.exists(exePath)) {
-            log.info("[WHISPER] Binary found at: {}", whisperPath);
-            if (!isWindows() && !Files.isExecutable(exePath)) {
-                log.warn("[WHISPER] Binary exists but is not executable, setting permissions...");
-                exePath.toFile().setExecutable(true);
-            }
-        } else {
-            log.error("[WHISPER] Binary not found at: {}. Please ensure it's installed.", whisperPath);
-        }
-
-        if (Files.exists(modelFilePath)) {
-            log.info("[WHISPER] Model found at: {}", modelPath);
-            File modelFile = modelFilePath.toFile();
-            if (modelFile.length() < 100000000) {
-                log.warn("[WHISPER] Model file size is suspiciously small ({} bytes)", modelFile.length());
-            }
-        } else {
-            log.warn("[WHISPER] Model not found at: {}. Please download it manually.", modelPath);
-        }
+        // Whisper is installed via pip in Docker, just log readiness
+        log.info("[WHISPER] Whisper available via Python package");
     }
 
     public boolean isModelValid() {
-        Path modelFilePath = Paths.get(modelPath);
-        if (Files.notExists(modelFilePath)) {
-            log.warn("[WHISPER] Модель не найдена: {}", modelPath);
-            return false;
-        }
+        // Whisper auto-downloads models, no need to validate
+        log.debug("[WHISPER] Model validation skipped (auto-download enabled)");
         return true;
     }
 
@@ -120,36 +82,31 @@ public class WhisperService {
      * @throws InterruptedException Если процесс был прерван
      */
     public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
-        log.info("[WHISPER] Начало транскрипции с определением языка для файла: {}", audioFile.getAbsolutePath());
+        log.info("[WHISPER] Beginning transcription with language detection for file: {}", audioFile.getAbsolutePath());
 
-        // Создаем временный базовый путь для вывода
-        // Создаем временный файл, чтобы получить уникальный путь, затем удаляем его,
-        // чтобы Whisper мог
-        // создать свои собственные файлы с расширениями
-        Path tempBaseFile = Files.createTempFile("whisper_out_lang_", "");
-        Files.deleteIfExists(tempBaseFile);
-        String basePath = tempBaseFile.toAbsolutePath().toString();
-
-        // Ожидаемые выходные файлы
-        Path jsonOutputFile = Paths.get(basePath + ".json");
-        Path txtOutputFile = Paths.get(basePath + ".txt");
+        // Use temp directory for output
+        Path tempDir = Files.createTempDirectory("whisper_out_");
+        String outputPath = tempDir.toString();
+        
+        // Expected output files from Python whisper
+        Path jsonOutputFile = Paths.get(outputPath, audioFile.getName() + ".json");
+        Path txtOutputFile = Paths.get(outputPath, audioFile.getName() + ".txt");
 
         try {
-            // Формирование команды whisper - использование CPU с 4 потоками
+            // Build command for Python whisper package
+            // whisper <audio> --output_dir <dir> --output_format json --language auto
             String[] command = {
                     whisperPath,
-                    "-m", modelPath,
-                    "-f", audioFile.getAbsolutePath(),
-                    "-of", basePath, // Базовый путь выходного файла
-                    "--output-txt", // Вывод в текстовом формате
-                    "-oj", // Вывод в формате JSON
-                    "--threads", String.valueOf(threads), // Использовать настроенное количество потоков
-                    useGpu ? "" : "-ng", // Условно отключить использование GPU
-                    "--language", "auto", // Автоопределение языка
-                    "--word-thold", "0.01" // Нижний порог обнаружения слов
+                    audioFile.getAbsolutePath(),
+                    "--output_dir", outputPath,
+                    "--output_format", "json",
+                    "--output_format", "txt",
+                    "--language", "auto", // Auto-detect language
+                    "--task", "transcribe",
+                    "--device", useGpu ? "cuda" : "cpu"
             };
 
-            // Удаление пустых аргументов
+            // Remove null/empty arguments  
             java.util.List<String> cmdList = new java.util.ArrayList<>();
             for (String arg : command) {
                 if (arg != null && !arg.isEmpty()) {
@@ -158,14 +115,14 @@ public class WhisperService {
             }
             command = cmdList.toArray(new String[0]);
 
-            log.debug("[WHISPER] Выполнение команды: {}", String.join(" ", command));
+            log.debug("[WHISPER] Executing command: {}", String.join(" ", command));
 
-            // Выполнение команды
+            // Execute command
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Чтение вывода процесса
+            // Read process output
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -178,7 +135,7 @@ public class WhisperService {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new RuntimeException(
-                        "Команда Whisper завершилась с кодом: " + exitCode + ", вывод: " + output.toString());
+                        "Whisper command finished with code: " + exitCode + ", output: " + output.toString());
             }
 
             String detectedLanguage = "unknown";
@@ -186,11 +143,11 @@ public class WhisperService {
 
             try {
                 if (Files.exists(jsonOutputFile)) {
-                    // Чтение выходного файла JSON, содержащего язык и транскрипцию
+                    // Read JSON output file containing language and transcription
                     String jsonOutput = Files.readString(jsonOutputFile);
-                    log.debug("Содержимое вывода JSON: {}", jsonOutput);
+                    log.debug("JSON output content: {}", jsonOutput);
 
-                    // Извлечение языка из JSON
+                    // Extract language from JSON
                     if (jsonOutput.contains("\"language\"")) {
                         int langStart = jsonOutput.indexOf("\"language\":\"") + "\"language\":\"".length();
                         int langEnd = jsonOutput.indexOf("\"", langStart);
