@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,27 +14,22 @@ import java.nio.file.Paths;
 @Service
 public class YtDlpService {
 
-    @Value("${app.ytdlp.path:./yt-dlp.exe}")
+    @Value("${app.ytdlp.path:}")
     private String ytDlpPath;
 
     private static final String DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 
-    public void ensureAvailable() throws IOException {
-        Path path = Paths.get(ytDlpPath);
-        if (Files.notExists(path)) {
-            log.info("[YTDLP] Скачивание yt-dlp...");
-            Files.createDirectories(path.getParent());
-            Files.deleteIfExists(path);
-
-            try (var in = java.net.URI.create(DOWNLOAD_URL).toURL().openStream()) {
-                Files.copy(in, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            path.toFile().setExecutable(true);
-            log.info("[YTDLP] Скачано: {}", ytDlpPath);
-        } else {
-            log.info("[YTDLP] Найден: {}", ytDlpPath);
+    @PostConstruct
+    private void initializePath() {
+        if (ytDlpPath == null || ytDlpPath.isEmpty()) {
+            // Use system command which should be in PATH
+            ytDlpPath = "yt-dlp";
+        } else if (!Paths.get(ytDlpPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            ytDlpPath = Paths.get(ytDlpPath).toAbsolutePath().toString();
         }
+        
+        log.info("[YTDLP] Initialized path: {}", ytDlpPath);
     }
 
     public java.io.File downloadVideo(String url, Path outputDir, String fileNameWithoutExt)

@@ -32,6 +32,20 @@ COPY --from=build /app/target/*.jar app.jar
 # Права на запись важны, так как Java будет скачивать сюда файлы
 RUN mkdir -p /app/downloads /app/llama /app/whisper && chmod -R 777 /app
 
+# Set environment variables to point to the correct paths
+# These will be consumed by the Spring application
+ENV APP_YTDLP_PATH=/usr/local/bin/yt-dlp
+ENV APP_FFMPEG_PATH=/usr/bin/ffmpeg
+ENV APP_DOWNLOAD_PATH=/app/downloads
+ENV APP_WHISPER_PATH=/app/whisper/whisper-cli
+ENV APP_WHISPER_MODEL_PATH=/app/whisper/models/ggml-large-v3.bin
+ENV APP_WHISPER_USE_GPU=false
+ENV APP_WHISPER_THREADS=4
+ENV APP_LLAMA_PATH=/app/llama/main
+ENV APP_LLAMA_MODEL_PATH=/app/llama/models/qwen2.5-7b-instruct-q3_k_m.gguf
+ENV APP_LLAMA_SERVER_PORT=8081
+ENV APP_LLAMA_THREADS=4
+
 EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -19,10 +20,10 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class LlamaService {
 
-    @Value("${app.llama.path:./llama/llama-server.exe}")
+    @Value("${app.llama.path:}")
     private String llamaPath;
 
-    @Value("${app.llama.model.path:./llama/models/qwen2.5-7b-instruct-q3_k_m.gguf}")
+    @Value("${app.llama.model.path:}")
     private String modelPath;
 
     @Value("${app.llama.server.port:8081}")
@@ -40,6 +41,32 @@ public class LlamaService {
     private static final String LLAMA_WINDOWS_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-win-vulkan-x64.zip";
     private static final String LLAMA_LINUX_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip";
     private static final String MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q3_k_m.gguf";
+
+    @PostConstruct
+    private void initializePaths() {
+        // Initialize llama server path
+        if (llamaPath == null || llamaPath.isEmpty()) {
+            String binaryName = isWindows() ? "llama-server.exe" : "main";
+            llamaPath = Paths.get("llama", binaryName).toAbsolutePath().toString();
+        } else if (!Paths.get(llamaPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            llamaPath = Paths.get(llamaPath).toAbsolutePath().toString();
+        }
+        
+        // Initialize model path
+        if (modelPath == null || modelPath.isEmpty()) {
+            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().toString();
+        } else if (!Paths.get(modelPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            modelPath = Paths.get(modelPath).toAbsolutePath().toString();
+        }
+        
+        log.info("[LLAMA] Initialized paths - server: {}, model: {}", llamaPath, modelPath);
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase().contains("win");
+    }
 
     private Process serverProcess;
     private volatile boolean serverStarting = false;

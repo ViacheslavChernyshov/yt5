@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -17,10 +18,10 @@ import java.nio.file.Paths;
 @Service
 public class WhisperService {
 
-    @Value("${app.whisper.path:./whisper/whisper-cli.exe}")
+    @Value("${app.whisper.path:}")
     private String whisperPath;
 
-    @Value("${app.whisper.model.path:./whisper/models/ggml-large-v3.bin}")
+    @Value("${app.whisper.model.path:}")
     private String modelPath;
 
     @Value("${app.whisper.use-gpu:false}")
@@ -32,6 +33,28 @@ public class WhisperService {
     private static final String WHISPER_WINDOWS_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
     private static final String WHISPER_LINUX_URL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip";
     private static final String MODEL_DOWNLOAD_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
+
+    @PostConstruct
+    private void initializePaths() {
+        // Initialize whisper executable path
+        if (whisperPath == null || whisperPath.isEmpty()) {
+            String binaryName = isWindows() ? "whisper-cli.exe" : "whisper-cli";
+            whisperPath = Paths.get("whisper", binaryName).toAbsolutePath().toString();
+        } else if (!Paths.get(whisperPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            whisperPath = Paths.get(whisperPath).toAbsolutePath().toString();
+        }
+        
+        // Initialize model path
+        if (modelPath == null || modelPath.isEmpty()) {
+            modelPath = Paths.get("whisper", "models", "ggml-large-v3.bin").toAbsolutePath().toString();
+        } else if (!Paths.get(modelPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            modelPath = Paths.get(modelPath).toAbsolutePath().toString();
+        }
+        
+        log.info("[WHISPER] Initialized paths - executable: {}, model: {}", whisperPath, modelPath);
+    }
 
     private static boolean isWindows() {
         return System.getProperty("os.name").toLowerCase().contains("win");

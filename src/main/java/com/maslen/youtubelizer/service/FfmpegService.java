@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,19 +16,22 @@ import java.util.zip.ZipInputStream;
 @Service
 public class FfmpegService {
 
-    @Value("${app.ffmpeg.path:./ffmpeg.exe}")
+    @Value("${app.ffmpeg.path:}")
     private String ffmpegPath;
 
     private static final String DOWNLOAD_URL = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 
-    public void ensureAvailable() throws IOException {
-        Path path = Paths.get(ffmpegPath);
-        if (Files.notExists(path)) {
-            log.info("[FFMPEG] Скачивание FFmpeg...");
-            download();
-        } else {
-            log.info("[FFMPEG] Найден: {}", ffmpegPath);
+    @PostConstruct
+    private void initializePath() {
+        if (ffmpegPath == null || ffmpegPath.isEmpty()) {
+            // Use system command which should be in PATH
+            ffmpegPath = "ffmpeg";
+        } else if (!Paths.get(ffmpegPath).isAbsolute()) {
+            // Convert relative paths to absolute paths relative to application root
+            ffmpegPath = Paths.get(ffmpegPath).toAbsolutePath().toString();
         }
+        
+        log.info("[FFMPEG] Initialized path: {}", ffmpegPath);
     }
 
     private void download() throws IOException {
