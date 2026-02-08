@@ -25,6 +25,18 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp
 
+# Скачивание и установка Whisper для Linux
+RUN mkdir -p /tmp/whisper_download && cd /tmp/whisper_download \
+    && curl -L https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-blas-bin-x64.zip -o whisper.zip \
+    && unzip -q whisper.zip \
+    && find . -type f -executable -name 'whisper*' | head -1 | xargs -I {} cp {} /app/whisper/whisper-cli \
+    && chmod a+x /app/whisper/whisper-cli \
+    && cd / && rm -rf /tmp/whisper_download
+
+# Скачивание Whisper-модели
+RUN mkdir -p /app/whisper/models && cd /app/whisper/models \
+    && curl -L -o ggml-large-v3.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+
 # Копируем JAR из стадии сборки
 COPY --from=build /app/target/*.jar app.jar
 
@@ -37,12 +49,12 @@ RUN mkdir -p /app/downloads /app/llama /app/whisper && chmod -R 777 /app
 ENV APP_YTDLP_PATH=/usr/local/bin/yt-dlp
 ENV APP_FFMPEG_PATH=/usr/bin/ffmpeg
 ENV APP_DOWNLOAD_PATH=/app/downloads
-ENV APP_WHISPER_PATH=./whisper/whisper-cli
-ENV APP_WHISPER_MODEL_PATH=./whisper/models/ggml-large-v3.bin
+ENV APP_WHISPER_PATH=/app/whisper/whisper-cli
+ENV APP_WHISPER_MODEL_PATH=/app/whisper/models/ggml-large-v3.bin
 ENV APP_WHISPER_USE_GPU=false
 ENV APP_WHISPER_THREADS=4
-ENV APP_LLAMA_PATH=./llama/main
-ENV APP_LLAMA_MODEL_PATH=./llama/models/qwen2.5-7b-instruct-q3_k_m.gguf
+ENV APP_LLAMA_PATH=/app/llama/main
+ENV APP_LLAMA_MODEL_PATH=/app/llama/models/qwen2.5-7b-instruct-q3_k_m.gguf
 ENV APP_LLAMA_SERVER_PORT=8081
 ENV APP_LLAMA_THREADS=4
 
