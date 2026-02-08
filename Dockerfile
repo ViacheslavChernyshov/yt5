@@ -31,8 +31,8 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
     && chmod a+rx /usr/local/bin/yt-dlp
 
 # Копируем бинарники из официальных образов
-COPY --from=llama-source /usr/bin/llama-server /usr/local/bin/llama-server
-COPY --from=whisper-source /usr/bin/whisper-cli /usr/local/bin/whisper
+COPY --from=llama-source /app/llama-server /usr/local/bin/llama-server
+COPY --from=whisper-source /app/whisper-cli /usr/local/bin/whisper
 
 RUN chmod +x /usr/local/bin/llama-server /usr/local/bin/whisper
 
