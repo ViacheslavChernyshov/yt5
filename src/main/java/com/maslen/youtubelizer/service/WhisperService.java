@@ -39,18 +39,24 @@ public class WhisperService {
         // Initialize whisper executable path
         if (whisperPath == null || whisperPath.isEmpty()) {
             String binaryName = isWindows() ? "whisper-cli.exe" : "whisper-cli";
-            whisperPath = Paths.get("whisper", binaryName).toAbsolutePath().toString();
+            whisperPath = Paths.get("whisper", binaryName).toAbsolutePath().normalize().toString();
         } else if (!Paths.get(whisperPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            whisperPath = Paths.get(whisperPath).toAbsolutePath().toString();
+            whisperPath = Paths.get(whisperPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            whisperPath = Paths.get(whisperPath).normalize().toString();
         }
         
         // Initialize model path
         if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("whisper", "models", "ggml-large-v3.bin").toAbsolutePath().toString();
+            modelPath = Paths.get("whisper", "models", "ggml-large-v3.bin").toAbsolutePath().normalize().toString();
         } else if (!Paths.get(modelPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            modelPath = Paths.get(modelPath).toAbsolutePath().toString();
+            modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            modelPath = Paths.get(modelPath).normalize().toString();
         }
         
         log.info("[WHISPER] Initialized paths - executable: {}, model: {}", whisperPath, modelPath);

@@ -47,18 +47,24 @@ public class LlamaService {
         // Initialize llama server path
         if (llamaPath == null || llamaPath.isEmpty()) {
             String binaryName = isWindows() ? "llama-server.exe" : "main";
-            llamaPath = Paths.get("llama", binaryName).toAbsolutePath().toString();
+            llamaPath = Paths.get("llama", binaryName).toAbsolutePath().normalize().toString();
         } else if (!Paths.get(llamaPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            llamaPath = Paths.get(llamaPath).toAbsolutePath().toString();
+            llamaPath = Paths.get(llamaPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            llamaPath = Paths.get(llamaPath).normalize().toString();
         }
         
         // Initialize model path
         if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().toString();
+            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().normalize().toString();
         } else if (!Paths.get(modelPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            modelPath = Paths.get(modelPath).toAbsolutePath().toString();
+            modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            modelPath = Paths.get(modelPath).normalize().toString();
         }
         
         log.info("[LLAMA] Initialized paths - server: {}, model: {}", llamaPath, modelPath);

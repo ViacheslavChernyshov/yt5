@@ -28,7 +28,10 @@ public class FfmpegService {
             ffmpegPath = "ffmpeg";
         } else if (!Paths.get(ffmpegPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            ffmpegPath = Paths.get(ffmpegPath).toAbsolutePath().toString();
+            ffmpegPath = Paths.get(ffmpegPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            ffmpegPath = Paths.get(ffmpegPath).normalize().toString();
         }
         
         log.info("[FFMPEG] Initialized path: {}", ffmpegPath);

@@ -26,7 +26,10 @@ public class YtDlpService {
             ytDlpPath = "yt-dlp";
         } else if (!Paths.get(ytDlpPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
-            ytDlpPath = Paths.get(ytDlpPath).toAbsolutePath().toString();
+            ytDlpPath = Paths.get(ytDlpPath).toAbsolutePath().normalize().toString();
+        } else {
+            // Normalize absolute paths to remove redundant components
+            ytDlpPath = Paths.get(ytDlpPath).normalize().toString();
         }
         
         log.info("[YTDLP] Initialized path: {}", ytDlpPath);
