@@ -94,14 +94,13 @@ public class WhisperService {
 
         try {
             // Build command for Python whisper package
-            // whisper <audio> --output_dir <dir> --output_format json --language auto
+            // Note: Don't use --language auto, just omit --language to let whisper auto-detect
             String[] command = {
                     whisperPath,
                     audioFile.getAbsolutePath(),
                     "--output_dir", outputPath,
                     "--output_format", "json",
                     "--output_format", "txt",
-                    "--language", "auto", // Auto-detect language
                     "--task", "transcribe",
                     "--device", useGpu ? "cuda" : "cpu"
             };

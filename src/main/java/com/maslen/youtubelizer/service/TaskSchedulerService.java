@@ -64,6 +64,21 @@ public class TaskSchedulerService {
     @Autowired
     private MessageService messageService;
 
+    /**
+     * Truncate error message to a reasonable length to avoid database and Telegram limits
+     * Database column: character varying(2048)
+     * Telegram message limit: 4096 chars
+     */
+    private String truncateErrorMessage(String message) {
+        if (message == null) {
+            return "Unknown error";
+        }
+        // Truncate to 500 chars to leave room for context in messages
+        String truncated = message.length() > 500 ? message.substring(0, 500) + "..." : message;
+        // Remove newlines to make it more readable in Telegram
+        return truncated.replaceAll("\\n+", " ").replaceAll("\\s+", " ");
+    }
+
     @Scheduled(fixedDelay = 10000) // Increased delay to 10 seconds to allow Flyway to run first
     public void processNextTask() {
         try {
@@ -169,10 +184,10 @@ public class TaskSchedulerService {
         } catch (Exception e) {
             log.error("Ошибка при обработке задачи {}", task.getId(), e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage(e.getMessage());
-            task.setErrorMessage(e.getMessage());
+            String errorMsg = truncateErrorMessage(e.getMessage());
+            task.setErrorMessage(errorMsg);
             sendMessage(task.getChatId(),
-                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
+                    messageService.getMessage("common.error", task.getLanguageCode()) + errorMsg);
         }
 
         downloadTaskRepository.save(task);
@@ -268,9 +283,10 @@ public class TaskSchedulerService {
         } catch (Exception e) {
             log.error("[TEXT_NORMALIZATION] Ошибка нормализации текста для видео: {}", task.getVideoId(), e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Error during normalization: " + e.getMessage());
+            String errorMsg = truncateErrorMessage(e.getMessage());
+            task.setErrorMessage("Error during normalization: " + errorMsg);
             sendMessage(task.getChatId(),
-                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
+                    messageService.getMessage("common.error", task.getLanguageCode()) + errorMsg);
         }
     }
 
@@ -430,9 +446,10 @@ public class TaskSchedulerService {
         } catch (Exception e) {
             log.error("[ZIP] Error in full processing for video: {}", task.getVideoId(), e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("Error: " + e.getMessage());
+            String errorMsg = truncateErrorMessage(e.getMessage());
+            task.setErrorMessage("Error: " + errorMsg);
             sendMessage(task.getChatId(),
-                    messageService.getMessage("common.error", task.getLanguageCode()) + e.getMessage());
+                    messageService.getMessage("common.error", task.getLanguageCode()) + errorMsg);
         } finally {
             // Step 7: Cleanup
             if (tempDir != null) {
