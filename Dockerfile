@@ -29,8 +29,17 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 RUN mkdir -p /app/downloads /app/llama /app/llama/models /app/whisper /app/whisper/models \
     && chmod -R 777 /app
 
+# Copy Llama model from build context if it exists
+COPY llama/models/* /app/llama/models/
+
 # Install Whisper via Python package (more reliable than binary)
 RUN pip3 install openai-whisper
+
+# Pre-download Whisper model during build (avoiding downloads at runtime)
+# This saves significant time during container startup
+RUN echo "Pre-downloading Whisper large-v3 model (this may take a few minutes)..." && \
+    python3 -c "import whisper; whisper.load_model('large-v3')" && \
+    echo "Whisper model downloaded successfully"
 
 # Try to download Llama.cpp binary, but don't fail if it doesn't work
 # The application can still run if llama binary is missing (graceful degradation)
