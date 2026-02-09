@@ -172,6 +172,9 @@ public class WhisperService {
                 }
                 transcription = transcriptionBuilder.toString().trim();
             }
+            
+            // Normalize: remove excessive whitespace
+            transcription = transcription.replaceAll("\\s+", " ").trim();
 
             log.info("[WHISPER] Транскрипция успешно завершена, язык: {}, длина: {} символов", detectedLanguage,
                     transcription.length());

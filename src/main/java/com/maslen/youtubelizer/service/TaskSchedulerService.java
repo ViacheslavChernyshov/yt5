@@ -267,11 +267,17 @@ public class TaskSchedulerService {
                         messageService.getMessage("common.error", task.getLanguageCode()) + " Empty result from LLM");
                 return;
             }
+            
+            // Clean and normalize the text
+            normalizedText = normalizeTranscriptionText(normalizedText);
 
             // Шаг 5: Сохранение нормализованного текста в базу данных
             video.setNormalizedText(normalizedText);
             videoRepository.save(video);
             log.info("[TEXT_NORMALIZATION] Сохранен нормализованный текст для видео: {}", task.getVideoId());
+            
+            // Шаг 5.5: Сохранение нормализованного текста в файл
+            saveNormalizedTextToFile(task.getVideoId(), normalizedText);
 
             // Шаг 6: Отправка нормализованного текста пользователю
             sendNormalizedTextToUser(task.getChatId(), normalizedText, task.getVideoId(), task.getLanguageCode());
@@ -287,6 +293,22 @@ public class TaskSchedulerService {
             task.setErrorMessage("Error during normalization: " + errorMsg);
             sendMessage(task.getChatId(),
                     messageService.getMessage("common.error", task.getLanguageCode()) + errorMsg);
+        }
+    }
+    
+    /**
+     * Save normalized text to file
+     */
+    private void saveNormalizedTextToFile(String videoId, String normalizedText) {
+        try {
+            Path downloadsDir = Paths.get("downloads");
+            Files.createDirectories(downloadsDir);
+            
+            Path normalizedFile = downloadsDir.resolve("normalized_" + videoId + ".txt");
+            Files.writeString(normalizedFile, normalizedText);
+            log.info("Normalized text saved to file: {}", normalizedFile.toAbsolutePath());
+        } catch (Exception e) {
+            log.warn("Failed to save normalized text to file for video {}: {}", videoId, e.getMessage());
         }
     }
 
@@ -327,9 +349,49 @@ public class TaskSchedulerService {
         Object[] result = whisperService.transcribeWithLanguage(audioFile);
         String transcription = (String) result[0];
         String detectedLanguage = (String) result[1];
+        
+        // Clean and normalize transcription text
+        transcription = normalizeTranscriptionText(transcription);
 
         // Step 3: Save transcription result to database and return the Video entity
-        return saveTranscriptionResult(task, transcription, detectedLanguage);
+        Video video = saveTranscriptionResult(task, transcription, detectedLanguage);
+        
+        // Step 4: Save transcription to file
+        if (video != null) {
+            saveTranscriptionToFile(task.getVideoId(), transcription);
+        }
+        
+        return video;
+    }
+    
+    /**
+     * Clean and normalize transcription text from Whisper output
+     */
+    private String normalizeTranscriptionText(String transcription) {
+        if (transcription == null || transcription.isEmpty()) {
+            return transcription;
+        }
+        
+        // Remove excessive whitespace
+        transcription = transcription.replaceAll("\\s+", " ").trim();
+        
+        return transcription;
+    }
+    
+    /**
+     * Save transcription to text file
+     */
+    private void saveTranscriptionToFile(String videoId, String transcription) {
+        try {
+            Path downloadsDir = Paths.get("downloads");
+            Files.createDirectories(downloadsDir);
+            
+            Path transcriptionFile = downloadsDir.resolve("transcription_" + videoId + ".txt");
+            Files.writeString(transcriptionFile, transcription);
+            log.info("Transcription saved to file: {}", transcriptionFile.toAbsolutePath());
+        } catch (Exception e) {
+            log.warn("Failed to save transcription to file for video {}: {}", videoId, e.getMessage());
+        }
     }
 
     private void sendNormalizedTextToUser(Long chatId, String normalizedText, String videoId, String languageCode) {

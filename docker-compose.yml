@@ -28,7 +28,7 @@ services:
     volumes:
       - ./downloads:/app/downloads
       - ./llama:/app/llama
-      - ./whisper:/app/whisper
+      - whisper_cache:/app/whisper
     depends_on:
       - postgres
 
@@ -47,3 +47,4 @@ services:
 
 volumes:
   youtubelizer_pgdata:
+  whisper_cache:

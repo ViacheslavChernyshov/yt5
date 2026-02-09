@@ -38,7 +38,8 @@ RUN pip3 install openai-whisper
 # Pre-download Whisper model during build (avoiding downloads at runtime)
 # This saves significant time during container startup
 RUN echo "Pre-downloading Whisper large-v3 model (this may take a few minutes)..." && \
-    python3 -c "import whisper; whisper.load_model('large-v3')" && \
+    mkdir -p /app/whisper && \
+    HF_HOME=/app/whisper python3 -c "import whisper; model = whisper.load_model('large-v3'); print('Model loaded to cache')" && \
     echo "Whisper model downloaded successfully"
 
 # Try to download Llama.cpp binary, but don't fail if it doesn't work
@@ -73,6 +74,8 @@ ENV APP_YTDLP_PATH=/usr/local/bin/yt-dlp \
     APP_WHISPER_PATH=whisper \
     APP_WHISPER_USE_GPU=false \
     APP_WHISPER_THREADS=4 \
+    HF_HOME=/app/whisper \
+    WHISPER_CACHE=/app/whisper \
     APP_LLAMA_PATH=/app/llama/main \
     APP_LLAMA_MODEL_PATH=/app/llama/models/qwen2.5-7b-instruct-q3_k_m.gguf \
     APP_LLAMA_SERVER_HOST=localhost \
