@@ -48,8 +48,73 @@ public class WhisperService {
     }
 
     public void ensureAvailable() throws IOException {
-        // Whisper is installed via pip in Docker, just log readiness
-        log.info("[WHISPER] Whisper available via Python package");
+        // Pre-load Whisper model to cache on application startup
+        // This ensures fast transcription requests without delay
+        try {
+            log.info("[WHISPER] Starting Whisper model pre-load...");
+            
+            // Create a small test audio file or use existing whisper command to validate setup
+            // Actually load the model by running whisper --help which initializes Python module
+            ProcessBuilder pb = new ProcessBuilder(whisperPath, "--help");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            int exitCode = p.waitFor();
+            
+            if (exitCode == 0) {
+                log.info("[WHISPER] Whisper command-line tool verified");
+            } else {
+                log.warn("[WHISPER] Whisper help command returned non-zero exit code: {}", exitCode);
+            }
+            
+            // Now pre-load the model itself to ensure it's cached before first use
+            // This can take a minute on first run, but subsequent starts will be instant
+            log.info("[WHISPER] Loading model from cache (this may take a minute on first startup)...");
+            
+            long startTime = System.currentTimeMillis();
+            String[] loadCommand = {
+                "python3", "-c",
+                "import whisper; " +
+                "print('Loading model...'); " +
+                "model = whisper.load_model('large-v3'); " +
+                "print('Model loaded successfully'); " +
+                "print('Model type: ' + str(type(model))); " +
+                "print('Device: ' + model.device)"
+            };
+            
+            ProcessBuilder modelLoadPb = new ProcessBuilder(loadCommand);
+            modelLoadPb.redirectErrorStream(true);
+            Process modelProcess = modelLoadPb.start();
+            
+            StringBuilder modelOutput = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(modelProcess.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    log.debug("[WHISPER] Model load output: {}", line);
+                    modelOutput.append(line).append("\n");
+                }
+            }
+            
+            int modelExitCode = modelProcess.waitFor();
+            long endTime = System.currentTimeMillis();
+            long duration = (endTime - startTime) / 1000;
+            
+            if (modelExitCode == 0) {
+                log.info("[WHISPER] ✅ Model loaded successfully in {} seconds", duration);
+                log.debug("[WHISPER] Model output: {}", modelOutput.toString());
+            } else {
+                log.warn("[WHISPER] Model loading returned exit code: {}, output: {}", modelExitCode, modelOutput.toString());
+                throw new IOException("Failed to load Whisper model, exit code: " + modelExitCode);
+            }
+            
+            log.info("[WHISPER] Whisper is ready for transcription");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("[WHISPER] Interrupted while loading Whisper model", e);
+            throw new IOException("Whisper initialization interrupted", e);
+        } catch (Exception e) {
+            log.error("[WHISPER] Failed to ensure Whisper availability: {}", e.getMessage(), e);
+            throw new IOException("Whisper initialization failed: " + e.getMessage(), e);
+        }
     }
 
     public boolean isModelValid() {
@@ -155,22 +220,54 @@ public class WhisperService {
 
             String transcription = transcriptionBuilder.toString().trim();
             
+            log.debug("[WHISPER] Parsed transcription: {} characters, detected language: {}", 
+                    transcription.length(), detectedLanguage);
+            
             // Fallback: if no transcription was parsed, try to extract from generic output
             if (transcription.isEmpty()) {
                 log.warn("[WHISPER] No transcription segments found in output, checking for alternative format");
                 String outputStr = output.toString();
+                log.debug("[WHISPER] Full output:\n{}", outputStr);
                 
                 // Try to find any text between timestamps
                 java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]\\s+(.+)");
                 java.util.regex.Matcher matcher = pattern.matcher(outputStr);
                 
+                int segmentCount = 0;
                 while (matcher.find()) {
                     String segmentText = matcher.group(1).trim();
+                    if (!segmentText.isEmpty()) {
+                        transcriptionBuilder.append(segmentText).append(" ");
+                        segmentCount++;
+                    }
+                }
+                transcription = transcriptionBuilder.toString().trim();
+                log.info("[WHISPER] Extracted {} segments using fallback pattern, total length: {}", 
+                        segmentCount, transcription.length());
+            }
+            
+            // If still empty, try alternative pattern without spaces after bracket
+            if (transcription.isEmpty()) {
+                log.warn("[WHISPER] Fallback pattern also returned empty, trying alternative patterns");
+                String outputStr = output.toString();
+                
+                // Try pattern without requiring space after bracket
+                java.util.regex.Pattern altPattern1 = java.util.regex.Pattern.compile("\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\](.+?)(?=\\[|$)");
+                java.util.regex.Matcher altMatcher1 = altPattern1.matcher(outputStr);
+                
+                while (altMatcher1.find()) {
+                    String segmentText = altMatcher1.group(1).trim();
                     if (!segmentText.isEmpty()) {
                         transcriptionBuilder.append(segmentText).append(" ");
                     }
                 }
                 transcription = transcriptionBuilder.toString().trim();
+                
+                if (!transcription.isEmpty()) {
+                    log.info("[WHISPER] Alternative pattern found {} characters", transcription.length());
+                } else {
+                    log.warn("[WHISPER] All patterns returned empty, raw output was: {}", outputStr);
+                }
             }
             
             // Normalize: remove excessive whitespace

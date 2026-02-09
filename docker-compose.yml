@@ -23,6 +23,9 @@ services:
       APP_LLAMA_PATH: ./llama/llama-server
       APP_WHISPER_MODEL_PATH: /app/whisper/ggml-large-v3.bin
       APP_LLAMA_MODEL_PATH: /app/llama/ggml-model-q4_k_m.gguf
+      # Whisper cache location - ensures model persists across container restarts and rebuilds
+      HF_HOME: /app/whisper
+      WHISPER_CACHE: /app/whisper
       # Токен (должен быть передан извне)
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     volumes:
@@ -30,7 +33,14 @@ services:
       - ./llama:/app/llama
       - whisper_cache:/app/whisper
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   postgres:
     image: postgres:16
@@ -44,6 +54,11 @@ services:
       - "5432:5432"
     volumes:
       - youtubelizer_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   youtubelizer_pgdata:

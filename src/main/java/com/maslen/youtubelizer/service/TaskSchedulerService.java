@@ -214,11 +214,22 @@ public class TaskSchedulerService {
         // Шаг 2: Если не найдено, выполняем транскрипцию
         Video video = performTranscription(task, url);
 
-        if (video != null) {
+        if (video != null && video.getTranscriptionText() != null && !video.getTranscriptionText().isEmpty()) {
             // Шаг 3: Отправляем транскрипцию пользователю
             sendTranscriptionToUser(task.getChatId(), video.getTranscriptionText(), task.getVideoId(),
                     task.getLanguageCode());
             task.setStatus(TaskStatus.COMPLETED);
+        } else {
+            // Ошибка: транскрипция не получена или пуста
+            task.setStatus(TaskStatus.FAILED);
+            String errorMsg = "Transcription failed or returned empty result";
+            if (video == null) {
+                errorMsg = "Failed to save transcription to database";
+            }
+            task.setErrorMessage(errorMsg);
+            log.error("[SPEECH_RECOGNITION] {}", errorMsg);
+            sendMessage(task.getChatId(),
+                    messageService.getMessage("common.error", task.getLanguageCode()) + " " + errorMsg);
         }
     }
 

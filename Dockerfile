@@ -35,12 +35,13 @@ COPY llama/models/* /app/llama/models/
 # Install Whisper via Python package (more reliable than binary)
 RUN pip3 install openai-whisper
 
-# Pre-download Whisper model during build (avoiding downloads at runtime)
-# This saves significant time during container startup
-RUN echo "Pre-downloading Whisper large-v3 model (this may take a few minutes)..." && \
+# Pre-download Whisper model to cache in the runtime image
+# This ensures the model is available in the final container image
+# The volume mount in docker-compose will preserve this between container restarts
+RUN echo "Pre-downloading Whisper large-v3 model (this takes ~2-4 minutes)..." && \
     mkdir -p /app/whisper && \
-    HF_HOME=/app/whisper python3 -c "import whisper; model = whisper.load_model('large-v3'); print('Model loaded to cache')" && \
-    echo "Whisper model downloaded successfully"
+    mkdir -p /root/.cache/whisper && \
+    python3 -c "import whisper; print('Loading model...'); model = whisper.load_model('large-v3'); print('✅ Model loaded and cached successfully')"
 
 # Try to download Llama.cpp binary, but don't fail if it doesn't work
 # The application can still run if llama binary is missing (graceful degradation)
@@ -67,6 +68,10 @@ RUN mkdir -p /tmp/llama_extract && cd /tmp/llama_extract && \
 # Копируем JAR из стадии сборки
 COPY --from=build /app/target/*.jar app.jar
 
+# Copy startup script for initialization
+COPY docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Set environment variables for tools and configuration
 ENV APP_YTDLP_PATH=/usr/local/bin/yt-dlp \
     APP_FFMPEG_PATH=/usr/bin/ffmpeg \
@@ -84,4 +89,5 @@ ENV APP_YTDLP_PATH=/usr/local/bin/yt-dlp \
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["-jar", "app.jar"]
