@@ -31,6 +31,7 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -314,6 +315,26 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             // Update chat ID and language to the latest request
             existingTask.setChatId(chatId);
             existingTask.setLanguageCode(languageCode);
+            
+            // Handle task stuck in PROCESSING state
+            if (existingTask.getStatus() == TaskStatus.PROCESSING) {
+                LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
+                if (existingTask.getUpdatedAt().isBefore(fiveMinutesAgo)) {
+                    // Task is stuck for more than 5 minutes - force restart
+                    log.warn("Task stuck in PROCESSING for > 5 minutes, restarting: {}", videoId);
+                    existingTask.setStatus(TaskStatus.PENDING);
+                    existingTask.setErrorMessage(null);
+                    downloadTaskRepository.save(existingTask);
+                    sendMessage(chatId, messageService.getMessage("bot.task_restarted", languageCode));
+                    return true;
+                } else {
+                    // Task was recently set to PROCESSING - notify user to wait
+                    log.info("Task already in processing, waiting...");
+                    sendMessage(chatId, messageService.getMessage("bot.task_already_processing", languageCode));
+                    downloadTaskRepository.save(existingTask);
+                    return true;
+                }
+            }
             
             // If the task was completed or failed, restart it
             if (existingTask.getStatus() == TaskStatus.COMPLETED || existingTask.getStatus() == TaskStatus.FAILED) {
