@@ -84,23 +84,12 @@ public class WhisperService {
     public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
         log.info("[WHISPER] Beginning transcription with language detection for file: {}", audioFile.getAbsolutePath());
 
-        // Use temp directory for output
-        Path tempDir = Files.createTempDirectory("whisper_out_");
-        String outputPath = tempDir.toString();
-        
-        // Expected output files from Python whisper
-        Path jsonOutputFile = Paths.get(outputPath, audioFile.getName() + ".json");
-        Path txtOutputFile = Paths.get(outputPath, audioFile.getName() + ".txt");
-
         try {
-            // Build command for Python whisper package
-            // Note: Don't use --language auto, just omit --language to let whisper auto-detect
+            // Build command for Python whisper package without file output
+            // Whisper outputs transcription directly to console, we'll parse that
             String[] command = {
                     whisperPath,
                     audioFile.getAbsolutePath(),
-                    "--output_dir", outputPath,
-                    "--output_format", "json",
-                    "--output_format", "txt",
                     "--task", "transcribe",
                     "--device", useGpu ? "cuda" : "cpu"
             };
@@ -121,13 +110,40 @@ public class WhisperService {
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Read process output
+            // Read process output and parse transcription from console output
             StringBuilder output = new StringBuilder();
+            StringBuilder transcriptionBuilder = new StringBuilder();
+            String detectedLanguage = "unknown";
+            
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
+                boolean inTranscription = false;
+                
                 while ((line = reader.readLine()) != null) {
                     log.debug("[WHISPER] {}", line);
                     output.append(line).append("\n");
+                    
+                    // Parse language detection
+                    if (line.contains("Detected language:")) {
+                        int langStart = line.indexOf("Detected language:") + "Detected language:".length();
+                        detectedLanguage = line.substring(langStart).trim();
+                        inTranscription = true;
+                        log.info("[WHISPER] Detected language: {}", detectedLanguage);
+                        continue;
+                    }
+                    
+                    // Parse transcription lines (format: [HH:MM:SS.mmm --> HH:MM:SS.mmm]  Text)
+                    if (line.matches(".*\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\].*")) {
+                        inTranscription = true;
+                        // Extract text after the timestamp
+                        int closeBracketIdx = line.lastIndexOf("]");
+                        if (closeBracketIdx != -1 && closeBracketIdx < line.length() - 1) {
+                            String segmentText = line.substring(closeBracketIdx + 1).trim();
+                            if (!segmentText.isEmpty()) {
+                                transcriptionBuilder.append(segmentText).append(" ");
+                            }
+                        }
+                    }
                 }
             }
 
@@ -137,130 +153,32 @@ public class WhisperService {
                         "Whisper command finished with code: " + exitCode + ", output: " + output.toString());
             }
 
-            String detectedLanguage = "unknown";
-            String transcription = "";
-
-            try {
-                if (Files.exists(jsonOutputFile)) {
-                    // Read JSON output file containing language and transcription
-                    String jsonOutput = Files.readString(jsonOutputFile);
-                    log.debug("JSON output content: {}", jsonOutput);
-
-                    // Extract language from JSON
-                    if (jsonOutput.contains("\"language\"")) {
-                        int langStart = jsonOutput.indexOf("\"language\":\"") + "\"language\":\"".length();
-                        int langEnd = jsonOutput.indexOf("\"", langStart);
-                        if (langStart > -1 && langEnd > langStart) {
-                            detectedLanguage = jsonOutput.substring(langStart, langEnd);
-                        }
-                    }
-
-                    // Извлечение транскрипции из JSON - поиск текстовых сегментов
-                    // Более надежный подход для извлечения всего текста из сегментов
-                    if (jsonOutput.contains("\"segments\"")) {
-                        // Поиск массива сегментов и извлечение всех текстовых значений
-                        StringBuilder transcriptBuilder = new StringBuilder();
-
-                        // Поиск начала и конца массива сегментов
-                        int segmentsStart = jsonOutput.indexOf("\"segments\"");
-                        if (segmentsStart != -1) {
-                            int arrayStart = jsonOutput.indexOf("[", segmentsStart);
-                            if (arrayStart != -1) {
-                                // Поиск соответствующей закрывающей скобки для массива
-                                int bracketCount = 0;
-                                int pos = arrayStart;
-                                for (; pos < jsonOutput.length(); pos++) {
-                                    char c = jsonOutput.charAt(pos);
-                                    if (c == '[')
-                                        bracketCount++;
-                                    else if (c == ']')
-                                        bracketCount--;
-
-                                    if (bracketCount == 0) {
-                                        break;
-                                    }
-                                }
-
-                                if (pos < jsonOutput.length()) {
-                                    String segmentsArray = jsonOutput.substring(arrayStart, pos + 1);
-
-                                    // Извлечение всех текстовых полей из сегментов
-                                    int textIndex = 0;
-                                    while ((textIndex = segmentsArray.indexOf("\"text\":\"", textIndex)) != -1) {
-                                        textIndex += "\"text\":\"".length();
-                                        int textEnd = segmentsArray.indexOf("\"", textIndex);
-
-                                        if (textEnd != -1) {
-                                            String segmentText = segmentsArray.substring(textIndex, textEnd);
-                                            // Правильное деэкранирование JSON строк
-                                            segmentText = segmentText.replace("\\\"", "\"")
-                                                    .replace("\\n", "\n")
-                                                    .replace("\\t", "\t")
-                                                    .replace("\\r", "\r");
-                                            transcriptBuilder.append(segmentText.trim()).append(" ");
-                                            textIndex = textEnd; // Продолжение поиска после этой позиции
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        transcription = transcriptBuilder.toString().trim();
-                    }
-                } else {
-                    log.warn("[WHISPER] Файл вывода JSON не найден: {}", jsonOutputFile);
-                }
-            } catch (Exception e) {
-                log.warn("Не удалось разобрать вывод JSON, переход к текстовому файлу: {}", e.getMessage());
-            }
-
-            // Переход к чтению текстового файла
+            String transcription = transcriptionBuilder.toString().trim();
+            
+            // Fallback: if no transcription was parsed, try to extract from generic output
             if (transcription.isEmpty()) {
-                try {
-                    if (Files.exists(txtOutputFile)) {
-                        transcription = Files.readString(txtOutputFile);
-                        log.debug("Содержимое резервной транскрипции: {}", transcription);
-
-                        // Извлечение языка из текстового файла, если он еще не извлечен
-                        if (detectedLanguage.equals("unknown") && transcription.contains("auto-detected language:")) {
-                            int langStart = transcription.indexOf("auto-detected language:")
-                                    + "auto-detected language:".length();
-                            int spaceEnd = transcription.indexOf(" ", langStart);
-                            int newlineEnd = transcription.indexOf("\n", langStart);
-                            int endPos = Math.min(
-                                    spaceEnd != -1 ? spaceEnd : Integer.MAX_VALUE,
-                                    newlineEnd != -1 ? newlineEnd : Integer.MAX_VALUE);
-                            if (endPos != Integer.MAX_VALUE) {
-                                detectedLanguage = transcription.substring(langStart, endPos).trim();
-                                if (detectedLanguage.endsWith(",")) {
-                                    detectedLanguage = detectedLanguage.substring(0, detectedLanguage.length() - 1)
-                                            .trim();
-                                }
-                            }
-                        }
-                    } else {
-                        log.warn("[WHISPER] Текстовый файл вывода не найден: {}", txtOutputFile);
+                log.warn("[WHISPER] No transcription segments found in output, checking for alternative format");
+                String outputStr = output.toString();
+                
+                // Try to find any text between timestamps
+                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]\\s+(.+)");
+                java.util.regex.Matcher matcher = pattern.matcher(outputStr);
+                
+                while (matcher.find()) {
+                    String segmentText = matcher.group(1).trim();
+                    if (!segmentText.isEmpty()) {
+                        transcriptionBuilder.append(segmentText).append(" ");
                     }
-                } catch (IOException ioEx) {
-                    log.error("Не удалось прочитать текстовый файл вывода: {}", ioEx.getMessage());
                 }
+                transcription = transcriptionBuilder.toString().trim();
             }
 
             log.info("[WHISPER] Транскрипция успешно завершена, язык: {}, длина: {} символов", detectedLanguage,
                     transcription.length());
-            return new Object[] { transcription.trim(), detectedLanguage };
-        } finally {
-            // Очистка временных файлов
-            try {
-                Files.deleteIfExists(jsonOutputFile);
-            } catch (IOException e) {
-                log.warn("Не удалось удалить временный файл транскрипции JSON: {}", jsonOutputFile, e);
-            }
-            try {
-                Files.deleteIfExists(txtOutputFile);
-            } catch (IOException e) {
-                log.warn("Не удалось удалить временный файл транскрипции: {}", txtOutputFile, e);
-            }
+            return new Object[] { transcription, detectedLanguage };
+        } catch (Exception e) {
+            log.error("[WHISPER] Error during transcription: {}", e.getMessage(), e);
+            throw new RuntimeException("Transcription failed: " + e.getMessage(), e);
         }
     }
 
