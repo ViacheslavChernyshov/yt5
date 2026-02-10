@@ -145,8 +145,11 @@ public class LlamaService {
                     "-m", modelPath,
                     "--port", String.valueOf(serverPort),
                     "--host", "0.0.0.0",
-                    "-c", "4096",
-                    "-t", String.valueOf(threads)
+                    "-c", "1024",  // Context window: 1024 tokens saves ~3.5GB memory
+                    "-t", "2",     // Reduced threads to 2 for memory efficiency
+                    "--flash-attn",  // More efficient attention computation
+                    "-ngl", "0",     // CPU-only mode
+                    "--no-mmap"      // Lower peak memory on repeated calls
             );
 
             pb.redirectErrorStream(true);
@@ -240,7 +243,7 @@ public class LlamaService {
                         }
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 4096,
+                    "max_tokens": 1024,
                     "stream": false
                 }
                 """, escapeJson(prompt));

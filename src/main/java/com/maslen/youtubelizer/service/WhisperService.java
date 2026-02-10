@@ -12,6 +12,11 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -29,103 +34,108 @@ public class WhisperService {
     @Value("${app.whisper.threads:4}")
     private int threads;
 
+    @Value("${app.whisper.beam-size:5}")
+    private int beamSize;
+
+    @Value("${app.whisper.best-of:5}")
+    private int bestOf;
+
+    @Value("${app.whisper.gpu-device:0}")
+    private int gpuDevice;
+
+    @Value("${app.ffmpeg.path:ffmpeg}")
+    private String ffmpegPath;
+
+    /**
+     * Regex для парсинга временных меток whisper.cpp: [HH:MM:SS.mmm -->
+     * HH:MM:SS.mmm] Text
+     */
+    private static final Pattern TIMESTAMP_PATTERN = Pattern.compile(
+            "\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s*-->\\s*\\d{2}:\\d{2}:\\d{2}\\.\\d{3}]\\s*(.+)");
+
+    /** Regex для определения языка из вывода whisper.cpp */
+    private static final Pattern LANGUAGE_PATTERN = Pattern.compile(
+            "auto-detected\\s+language:\\s+(\\w+)");
+
+    /** Таймаут транскрипции — 30 минут */
+    private static final long TRANSCRIPTION_TIMEOUT_MINUTES = 30;
+
     @PostConstruct
     private void initializePaths() {
-        // Use Python's whisper command - installed via pip in Docker
-        // For local development, user must have: pip install openai-whisper
-        whisperPath = "whisper";
-        
-        // Initialize model path (whisper will auto-download if needed)
+        // Whisper binary path
+        if (whisperPath == null || whisperPath.isEmpty()) {
+            whisperPath = "whisper-cli";
+        } else if (!Paths.get(whisperPath).isAbsolute()) {
+            whisperPath = Paths.get(whisperPath).toAbsolutePath().normalize().toString();
+        } else {
+            whisperPath = Paths.get(whisperPath).normalize().toString();
+        }
+
+        // Model path
         if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get(System.getProperty("user.home"), ".cache", "whisper", "large-v3.pt").toAbsolutePath().normalize().toString();
+            modelPath = Paths.get("/app/whisper/ggml-large-v3.bin").toString();
         } else if (!Paths.get(modelPath).isAbsolute()) {
             modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
         } else {
             modelPath = Paths.get(modelPath).normalize().toString();
         }
-        
-        log.info("[WHISPER] Using whisper command from PATH, model cache: {}", modelPath);
+
+        log.info("[WHISPER] whisper-cli path: {}", whisperPath);
+        log.info("[WHISPER] Model path: {}", modelPath);
+        log.info("[WHISPER] GPU enabled: {}, device: {}", useGpu, gpuDevice);
+        log.info("[WHISPER] Threads: {}, Beam size: {}, Best-of: {}", threads, beamSize, bestOf);
     }
 
     public void ensureAvailable() throws IOException {
-        // Pre-load Whisper model to cache on application startup
-        // This ensures fast transcription requests without delay
+        log.info("[WHISPER] Проверка доступности whisper-cli...");
+
+        // Check binary exists
+        Path binaryPath = Paths.get(whisperPath);
+        if (binaryPath.isAbsolute() && !Files.exists(binaryPath)) {
+            throw new IOException("whisper-cli binary not found at: " + whisperPath);
+        }
+
+        // Check model exists
+        Path modelFilePath = Paths.get(modelPath);
+        if (!Files.exists(modelFilePath)) {
+            throw new IOException("Whisper model not found at: " + modelPath);
+        }
+
+        long modelSize = Files.size(modelFilePath);
+        log.info("[WHISPER] Model file size: {} MB", modelSize / (1024 * 1024));
+
+        // Test binary with --help
         try {
-            log.info("[WHISPER] Starting Whisper model pre-load...");
-            
-            // Create a small test audio file or use existing whisper command to validate setup
-            // Actually load the model by running whisper --help which initializes Python module
             ProcessBuilder pb = new ProcessBuilder(whisperPath, "--help");
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            int exitCode = p.waitFor();
-            
-            if (exitCode == 0) {
-                log.info("[WHISPER] Whisper command-line tool verified");
-            } else {
-                log.warn("[WHISPER] Whisper help command returned non-zero exit code: {}", exitCode);
+
+            boolean finished = p.waitFor(10, TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                throw new IOException("whisper-cli --help timed out");
             }
-            
-            // Now pre-load the model itself to ensure it's cached before first use
-            // This can take a minute on first run, but subsequent starts will be instant
-            log.info("[WHISPER] Loading model from cache (this may take a minute on first startup)...");
-            
-            long startTime = System.currentTimeMillis();
-            String[] loadCommand = {
-                "python3", "-c",
-                "import whisper; " +
-                "print('Loading model...'); " +
-                "model = whisper.load_model('large-v3'); " +
-                "print('Model loaded successfully'); " +
-                "print('Model type: ' + str(type(model))); " +
-                "print('Device: ' + model.device)"
-            };
-            
-            ProcessBuilder modelLoadPb = new ProcessBuilder(loadCommand);
-            modelLoadPb.redirectErrorStream(true);
-            Process modelProcess = modelLoadPb.start();
-            
-            StringBuilder modelOutput = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(modelProcess.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    log.debug("[WHISPER] Model load output: {}", line);
-                    modelOutput.append(line).append("\n");
-                }
-            }
-            
-            int modelExitCode = modelProcess.waitFor();
-            long endTime = System.currentTimeMillis();
-            long duration = (endTime - startTime) / 1000;
-            
-            if (modelExitCode == 0) {
-                log.info("[WHISPER] ✅ Model loaded successfully in {} seconds", duration);
-                log.debug("[WHISPER] Model output: {}", modelOutput.toString());
-            } else {
-                log.warn("[WHISPER] Model loading returned exit code: {}, output: {}", modelExitCode, modelOutput.toString());
-                throw new IOException("Failed to load Whisper model, exit code: " + modelExitCode);
-            }
-            
-            log.info("[WHISPER] Whisper is ready for transcription");
+
+            log.info("[WHISPER] ✅ whisper-cli доступен и готов к работе");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.error("[WHISPER] Interrupted while loading Whisper model", e);
-            throw new IOException("Whisper initialization interrupted", e);
-        } catch (Exception e) {
-            log.error("[WHISPER] Failed to ensure Whisper availability: {}", e.getMessage(), e);
-            throw new IOException("Whisper initialization failed: " + e.getMessage(), e);
+            throw new IOException("Проверка whisper-cli прервана", e);
         }
     }
 
     public boolean isModelValid() {
-        // Whisper auto-downloads models, no need to validate
-        log.debug("[WHISPER] Model validation skipped (auto-download enabled)");
-        return true;
+        try {
+            Path modelFilePath = Paths.get(modelPath);
+            return Files.exists(modelFilePath) && Files.size(modelFilePath) > 0;
+        } catch (IOException e) {
+            log.warn("[WHISPER] Ошибка проверки модели: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
-     * Транскрибирует аудиофайл с использованием Whisper
-     * 
+     * Транскрибирует аудиофайл с использованием whisper.cpp
+     *
      * @param audioFile Путь к аудиофайлу для транскрипции
      * @return Транскрибированный текст
      * @throws IOException          Если возникла проблема с файловыми операциями
@@ -137,148 +147,277 @@ public class WhisperService {
     }
 
     /**
-     * Транскрибирует аудиофайл с использованием Whisper и возвращает как
-     * транскрипцию, так и
-     * обнаруженный язык
-     * 
+     * Транскрибирует аудиофайл с использованием whisper.cpp и возвращает
+     * транскрипцию и обнаруженный язык.
+     *
+     * Процесс:
+     * 1. Конвертация аудио в WAV 16kHz mono (требование whisper.cpp)
+     * 2. Запуск whisper-cli с оптимальными параметрами
+     * 3. Парсинг вывода (временные метки + текст)
+     * 4. Очистка временных файлов
+     *
      * @param audioFile Путь к аудиофайлу для транскрипции
      * @return Массив объектов с [транскрипция, язык]
      * @throws IOException          Если возникла проблема с файловыми операциями
      * @throws InterruptedException Если процесс был прерван
      */
     public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
-        log.info("[WHISPER] Beginning transcription with language detection for file: {}", audioFile.getAbsolutePath());
+        log.info("[WHISPER] Начало транскрипции: {}", audioFile.getAbsolutePath());
 
+        // Step 1: Convert to WAV 16kHz mono (whisper.cpp requirement)
+        File wavFile = convertToWav(audioFile);
+
+        Process process = null;
         try {
-            // Build command for Python whisper package without file output
-            // Whisper outputs transcription directly to console, we'll parse that
-            String[] command = {
-                    whisperPath,
-                    audioFile.getAbsolutePath(),
-                    "--task", "transcribe",
-                    "--device", useGpu ? "cuda" : "cpu"
-            };
+            // Step 2: Build whisper-cli command
+            List<String> command = buildWhisperCommand(wavFile);
+            log.debug("[WHISPER] Команда: {}", String.join(" ", command));
 
-            // Remove null/empty arguments  
-            java.util.List<String> cmdList = new java.util.ArrayList<>();
-            for (String arg : command) {
-                if (arg != null && !arg.isEmpty()) {
-                    cmdList.add(arg);
-                }
-            }
-            command = cmdList.toArray(new String[0]);
-
-            log.debug("[WHISPER] Executing command: {}", String.join(" ", command));
-
-            // Execute command
+            // Step 3: Execute whisper-cli
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
+            process = processBuilder.start();
 
-            // Read process output and parse transcription from console output
-            StringBuilder output = new StringBuilder();
+            // Step 4: Read and parse output
+            StringBuilder fullOutput = new StringBuilder();
             StringBuilder transcriptionBuilder = new StringBuilder();
             String detectedLanguage = "unknown";
-            
+
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
-                boolean inTranscription = false;
-                
                 while ((line = reader.readLine()) != null) {
                     log.debug("[WHISPER] {}", line);
-                    output.append(line).append("\n");
-                    
+                    fullOutput.append(line).append("\n");
+
                     // Parse language detection
-                    if (line.contains("Detected language:")) {
-                        int langStart = line.indexOf("Detected language:") + "Detected language:".length();
-                        detectedLanguage = line.substring(langStart).trim();
-                        inTranscription = true;
-                        log.info("[WHISPER] Detected language: {}", detectedLanguage);
+                    Matcher langMatcher = LANGUAGE_PATTERN.matcher(line);
+                    if (langMatcher.find()) {
+                        detectedLanguage = langMatcher.group(1).trim();
+                        log.info("[WHISPER] Обнаружен язык: {}", detectedLanguage);
                         continue;
                     }
-                    
-                    // Parse transcription lines (format: [HH:MM:SS.mmm --> HH:MM:SS.mmm]  Text)
-                    if (line.matches(".*\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\].*")) {
-                        inTranscription = true;
-                        // Extract text after the timestamp
-                        int closeBracketIdx = line.lastIndexOf("]");
-                        if (closeBracketIdx != -1 && closeBracketIdx < line.length() - 1) {
-                            String segmentText = line.substring(closeBracketIdx + 1).trim();
-                            if (!segmentText.isEmpty()) {
-                                transcriptionBuilder.append(segmentText).append(" ");
-                            }
+
+                    // Parse transcription segments
+                    Matcher tsMatcher = TIMESTAMP_PATTERN.matcher(line);
+                    if (tsMatcher.find()) {
+                        String segmentText = tsMatcher.group(1).trim();
+                        if (!segmentText.isEmpty()) {
+                            transcriptionBuilder.append(segmentText).append(" ");
                         }
                     }
                 }
             }
 
-            int exitCode = process.waitFor();
+            // Step 5: Wait for process with timeout
+            boolean finished = process.waitFor(TRANSCRIPTION_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new IOException("Транскрипция превысила таймаут " + TRANSCRIPTION_TIMEOUT_MINUTES + " минут");
+            }
+
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
-                throw new RuntimeException(
-                        "Whisper command finished with code: " + exitCode + ", output: " + output.toString());
+                throw new IOException(
+                        "whisper-cli завершился с кодом: " + exitCode + ", вывод: " + fullOutput);
             }
 
             String transcription = transcriptionBuilder.toString().trim();
-            
-            log.debug("[WHISPER] Parsed transcription: {} characters, detected language: {}", 
-                    transcription.length(), detectedLanguage);
-            
-            // Fallback: if no transcription was parsed, try to extract from generic output
+
+            // Fallback parsing if main pattern didn't match
             if (transcription.isEmpty()) {
-                log.warn("[WHISPER] No transcription segments found in output, checking for alternative format");
-                String outputStr = output.toString();
-                log.debug("[WHISPER] Full output:\n{}", outputStr);
-                
-                // Try to find any text between timestamps
-                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]\\s+(.+)");
-                java.util.regex.Matcher matcher = pattern.matcher(outputStr);
-                
-                int segmentCount = 0;
-                while (matcher.find()) {
-                    String segmentText = matcher.group(1).trim();
-                    if (!segmentText.isEmpty()) {
-                        transcriptionBuilder.append(segmentText).append(" ");
-                        segmentCount++;
-                    }
-                }
-                transcription = transcriptionBuilder.toString().trim();
-                log.info("[WHISPER] Extracted {} segments using fallback pattern, total length: {}", 
-                        segmentCount, transcription.length());
+                transcription = fallbackParsing(fullOutput.toString());
             }
-            
-            // If still empty, try alternative pattern without spaces after bracket
-            if (transcription.isEmpty()) {
-                log.warn("[WHISPER] Fallback pattern also returned empty, trying alternative patterns");
-                String outputStr = output.toString();
-                
-                // Try pattern without requiring space after bracket
-                java.util.regex.Pattern altPattern1 = java.util.regex.Pattern.compile("\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3} --> \\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\](.+?)(?=\\[|$)");
-                java.util.regex.Matcher altMatcher1 = altPattern1.matcher(outputStr);
-                
-                while (altMatcher1.find()) {
-                    String segmentText = altMatcher1.group(1).trim();
-                    if (!segmentText.isEmpty()) {
-                        transcriptionBuilder.append(segmentText).append(" ");
-                    }
-                }
-                transcription = transcriptionBuilder.toString().trim();
-                
-                if (!transcription.isEmpty()) {
-                    log.info("[WHISPER] Alternative pattern found {} characters", transcription.length());
-                } else {
-                    log.warn("[WHISPER] All patterns returned empty, raw output was: {}", outputStr);
-                }
-            }
-            
-            // Normalize: remove excessive whitespace
+
+            // Normalize whitespace
             transcription = transcription.replaceAll("\\s+", " ").trim();
 
-            log.info("[WHISPER] Транскрипция успешно завершена, язык: {}, длина: {} символов", detectedLanguage,
-                    transcription.length());
+            log.info("[WHISPER] Транскрипция завершена. Язык: {}, длина: {} символов",
+                    detectedLanguage, transcription.length());
+
             return new Object[] { transcription, detectedLanguage };
-        } catch (Exception e) {
-            log.error("[WHISPER] Error during transcription: {}", e.getMessage(), e);
-            throw new RuntimeException("Transcription failed: " + e.getMessage(), e);
+
+        } catch (InterruptedException e) {
+            // Properly handle interruption
+            if (process != null) {
+                process.destroyForcibly();
+                log.warn("[WHISPER] Процесс транскрипции принудительно завершён из-за прерывания");
+            }
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (IOException e) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            log.error("[WHISPER] Ошибка транскрипции: {}", e.getMessage(), e);
+            throw e;
+        } finally {
+            // Cleanup WAV file
+            cleanupWavFile(wavFile, audioFile);
+        }
+    }
+
+    /**
+     * Конвертирует аудиофайл в WAV 16kHz mono с использованием ffmpeg.
+     * whisper.cpp работает оптимально с WAV PCM 16-bit, 16kHz, mono.
+     */
+    private File convertToWav(File audioFile) throws IOException, InterruptedException {
+        String inputPath = audioFile.getAbsolutePath();
+
+        // If already a 16kHz WAV, skip conversion
+        if (inputPath.endsWith(".wav")) {
+            log.debug("[WHISPER] Файл уже в формате WAV, пропускаем конвертацию");
+            return audioFile;
+        }
+
+        // Create WAV file path
+        String wavPath = inputPath.replaceAll("\\.[^.]+$", "") + "_16k.wav";
+        File wavFile = new File(wavPath);
+
+        log.info("[WHISPER] Конвертация {} -> WAV 16kHz mono...", audioFile.getName());
+
+        ProcessBuilder pb = new ProcessBuilder(
+                ffmpegPath,
+                "-i", inputPath,
+                "-ar", "16000", // 16kHz sample rate
+                "-ac", "1", // mono channel
+                "-c:a", "pcm_s16le", // 16-bit PCM
+                "-y", // overwrite output
+                wavPath);
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+
+        // Read output to prevent pipe blocking
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                log.debug("[FFMPEG] {}", line);
+            }
+        }
+
+        boolean finished = p.waitFor(5, TimeUnit.MINUTES);
+        if (!finished) {
+            p.destroyForcibly();
+            throw new IOException("ffmpeg конвертация превысила таймаут 5 минут");
+        }
+
+        if (p.exitValue() != 0) {
+            throw new IOException("ffmpeg конвертация завершилась с ошибкой, код: " + p.exitValue());
+        }
+
+        if (!wavFile.exists() || wavFile.length() == 0) {
+            throw new IOException("ffmpeg не создал WAV файл: " + wavPath);
+        }
+
+        log.info("[WHISPER] Конвертация завершена: {} ({} MB)",
+                wavFile.getName(), wavFile.length() / (1024 * 1024));
+
+        return wavFile;
+    }
+
+    /**
+     * Строит команду whisper-cli с оптимальными параметрами для качества.
+     */
+    private List<String> buildWhisperCommand(File wavFile) {
+        List<String> command = new ArrayList<>();
+        command.add(whisperPath);
+
+        // Model
+        command.add("-m");
+        command.add(modelPath);
+
+        // Input file
+        command.add("-f");
+        command.add(wavFile.getAbsolutePath());
+
+        // CPU threads
+        command.add("-t");
+        command.add(String.valueOf(threads));
+
+        // Quality: Beam search
+        if (beamSize > 1) {
+            command.add("-bs");
+            command.add(String.valueOf(beamSize));
+        }
+
+        // Quality: Best-of candidates
+        if (bestOf > 1) {
+            command.add("-bo");
+            command.add(String.valueOf(bestOf));
+        }
+
+        // Language: auto-detect
+        command.add("-l");
+        command.add("auto");
+
+        // GPU support
+        if (useGpu) {
+            command.add("--gpu");
+            command.add(String.valueOf(gpuDevice));
+        }
+
+        // Output control
+        command.add("--no-prints"); // suppress model info
+        command.add("-np"); // no progress bar
+
+        return command;
+    }
+
+    /**
+     * Запасной парсинг вывода, если основной regex не сработал.
+     */
+    private String fallbackParsing(String output) {
+        log.warn("[WHISPER] Основной парсинг не нашёл текста, пробуем запасной...");
+
+        StringBuilder result = new StringBuilder();
+
+        // Pattern 1: timestamps with any format
+        Pattern altPattern = Pattern.compile(
+                "\\[\\d{2}:\\d{2}[:.\\d]+ -->\\s*\\d{2}:\\d{2}[:.\\d]+]\\s*(.+)");
+        Matcher altMatcher = altPattern.matcher(output);
+        int count = 0;
+        while (altMatcher.find()) {
+            String text = altMatcher.group(1).trim();
+            if (!text.isEmpty()) {
+                result.append(text).append(" ");
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            log.info("[WHISPER] Запасной парсинг нашёл {} сегментов", count);
+        } else {
+            // Pattern 2: try to extract any non-log text
+            String[] lines = output.split("\n");
+            for (String line : lines) {
+                line = line.trim();
+                // Skip log lines and empty lines
+                if (!line.isEmpty()
+                        && !line.startsWith("whisper_")
+                        && !line.startsWith("ggml_")
+                        && !line.startsWith("main:")
+                        && !line.startsWith("system_info:")
+                        && !line.contains("auto-detected")
+                        && !line.contains("processing")) {
+                    result.append(line).append(" ");
+                }
+            }
+            log.warn("[WHISPER] Все паттерны вернули пусто, вывод: {}", output);
+        }
+
+        return result.toString().trim();
+    }
+
+    /**
+     * Удаляет временный WAV файл, если он отличается от оригинала.
+     */
+    private void cleanupWavFile(File wavFile, File originalFile) {
+        if (wavFile != null && !wavFile.equals(originalFile) && wavFile.exists()) {
+            try {
+                wavFile.delete();
+                log.debug("[WHISPER] Удалён временный WAV: {}", wavFile.getName());
+            } catch (Exception e) {
+                log.warn("[WHISPER] Не удалось удалить временный WAV: {}", wavFile.getName());
+            }
         }
     }
 

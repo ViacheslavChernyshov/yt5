@@ -65,7 +65,8 @@ public class TaskSchedulerService {
     private MessageService messageService;
 
     /**
-     * Truncate error message to a reasonable length to avoid database and Telegram limits
+     * Truncate error message to a reasonable length to avoid database and Telegram
+     * limits
      * Database column: character varying(2048)
      * Telegram message limit: 4096 chars
      */
@@ -92,9 +93,12 @@ public class TaskSchedulerService {
                 processTask(task);
             }
         } catch (Exception e) {
-            log.warn("Ошибка обработки задач, возможно таблица download_tasks еще не создана: {}",
-                    e.getMessage());
-            // Это может произойти при запуске, если миграции Flyway еще не завершились
+            String msg = e.getMessage();
+            if (msg != null && (msg.contains("BeanCreation") || msg.contains("DataSourceProperties"))) {
+                log.warn("Контекст приложения завершается или ещё не готов: {}", msg);
+            } else {
+                log.warn("Ошибка обработки задач: {}", msg);
+            }
         }
     }
 
@@ -181,6 +185,11 @@ public class TaskSchedulerService {
                 throw new IllegalArgumentException("Неизвестный тип задачи: " + task.getType());
             }
 
+        } catch (InterruptedException e) {
+            log.warn("Задача {} прервана (InterruptedException)", task.getId());
+            task.setStatus(TaskStatus.FAILED);
+            task.setErrorMessage("Task interrupted");
+            Thread.currentThread().interrupt();
         } catch (Exception e) {
             log.error("Ошибка при обработке задачи {}", task.getId(), e);
             task.setStatus(TaskStatus.FAILED);
@@ -278,7 +287,7 @@ public class TaskSchedulerService {
                         messageService.getMessage("common.error", task.getLanguageCode()) + " Empty result from LLM");
                 return;
             }
-            
+
             // Clean and normalize the text
             normalizedText = normalizeTranscriptionText(normalizedText);
 
@@ -286,7 +295,7 @@ public class TaskSchedulerService {
             video.setNormalizedText(normalizedText);
             videoRepository.save(video);
             log.info("[TEXT_NORMALIZATION] Сохранен нормализованный текст для видео: {}", task.getVideoId());
-            
+
             // Шаг 5.5: Сохранение нормализованного текста в файл
             saveNormalizedTextToFile(task.getVideoId(), normalizedText);
 
@@ -306,7 +315,7 @@ public class TaskSchedulerService {
                     messageService.getMessage("common.error", task.getLanguageCode()) + errorMsg);
         }
     }
-    
+
     /**
      * Save normalized text to file
      */
@@ -314,7 +323,7 @@ public class TaskSchedulerService {
         try {
             Path downloadsDir = Paths.get("downloads");
             Files.createDirectories(downloadsDir);
-            
+
             Path normalizedFile = downloadsDir.resolve("normalized_" + videoId + ".txt");
             Files.writeString(normalizedFile, normalizedText);
             log.info("Normalized text saved to file: {}", normalizedFile.toAbsolutePath());
@@ -360,21 +369,21 @@ public class TaskSchedulerService {
         Object[] result = whisperService.transcribeWithLanguage(audioFile);
         String transcription = (String) result[0];
         String detectedLanguage = (String) result[1];
-        
+
         // Clean and normalize transcription text
         transcription = normalizeTranscriptionText(transcription);
 
         // Step 3: Save transcription result to database and return the Video entity
         Video video = saveTranscriptionResult(task, transcription, detectedLanguage);
-        
+
         // Step 4: Save transcription to file
         if (video != null) {
             saveTranscriptionToFile(task.getVideoId(), transcription);
         }
-        
+
         return video;
     }
-    
+
     /**
      * Clean and normalize transcription text from Whisper output
      */
@@ -382,13 +391,13 @@ public class TaskSchedulerService {
         if (transcription == null || transcription.isEmpty()) {
             return transcription;
         }
-        
+
         // Remove excessive whitespace
         transcription = transcription.replaceAll("\\s+", " ").trim();
-        
+
         return transcription;
     }
-    
+
     /**
      * Save transcription to text file
      */
@@ -396,7 +405,7 @@ public class TaskSchedulerService {
         try {
             Path downloadsDir = Paths.get("downloads");
             Files.createDirectories(downloadsDir);
-            
+
             Path transcriptionFile = downloadsDir.resolve("transcription_" + videoId + ".txt");
             Files.writeString(transcriptionFile, transcription);
             log.info("Transcription saved to file: {}", transcriptionFile.toAbsolutePath());
@@ -509,7 +518,8 @@ public class TaskSchedulerService {
             SendDocument sendDocument = SendDocument.builder()
                     .chatId(task.getChatId())
                     .document(new InputFile(zipFile))
-                    .caption(messageService.getMessage("task.completed.full_processing_caption", task.getLanguageCode()))
+                    .caption(
+                            messageService.getMessage("task.completed.full_processing_caption", task.getLanguageCode()))
                     .build();
             telegramClient.execute(sendDocument);
 

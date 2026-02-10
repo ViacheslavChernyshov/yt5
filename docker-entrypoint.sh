@@ -5,27 +5,38 @@ echo "=========================================="
 echo "YouTubeLizer Docker Container Startup"
 echo "=========================================="
 
-# Set environment variables for Whisper cache
-export HF_HOME=${HF_HOME:-/app/whisper}
-export WHISPER_CACHE=${WHISPER_CACHE:-/app/whisper}
-mkdir -p "$HF_HOME"
-
 echo ""
 echo "[1/3] Checking external tools..."
-echo "  - yt-dlp: $(which yt-dlp)"
-echo "  - ffmpeg: $(which ffmpeg)"
-echo "  - python3: $(which python3)"
+echo "  - yt-dlp: $(which yt-dlp 2>/dev/null || echo 'NOT FOUND')"
+echo "  - ffmpeg: $(which ffmpeg 2>/dev/null || echo 'NOT FOUND')"
+echo "  - whisper-cli: ${APP_WHISPER_PATH:-/app/whisper/whisper-cli}"
+echo "  - java: $(java -version 2>&1 | head -1)"
 
 echo ""
-echo "[2/3] Pre-loading Whisper model to cache..."
-echo "  Cache location: $HF_HOME"
-echo "  This may take 2-4 minutes on first startup..."
+echo "[2/3] Verifying whisper.cpp..."
 
-# Try to pre-load the Whisper model
-if python3 -c "import whisper; print('Loading model...'); model = whisper.load_model('large-v3'); print('✅ Whisper model loaded successfully')" 2>&1; then
-    echo "  ✅ Whisper model is ready"
+WHISPER_PATH="${APP_WHISPER_PATH:-/app/whisper/whisper-cli}"
+MODEL_PATH="${APP_WHISPER_MODEL_PATH:-/app/whisper/ggml-large-v3.bin}"
+
+if [ -x "$WHISPER_PATH" ]; then
+    echo "  ✅ whisper-cli binary found: $WHISPER_PATH"
 else
-    echo "  ⚠️  Whisper model pre-load failed, will attempt to load on first request"
+    echo "  ❌ whisper-cli binary NOT found at: $WHISPER_PATH"
+fi
+
+if [ -f "$MODEL_PATH" ]; then
+    MODEL_SIZE=$(du -sh "$MODEL_PATH" | cut -f1)
+    echo "  ✅ Model found: $MODEL_PATH ($MODEL_SIZE)"
+else
+    echo "  ❌ Model NOT found at: $MODEL_PATH"
+fi
+
+# Check GPU availability
+if command -v nvidia-smi &> /dev/null; then
+    echo "  🎮 GPU detected:"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "  ⚠️  nvidia-smi failed"
+else
+    echo "  ℹ️  No NVIDIA GPU detected, will use CPU mode"
 fi
 
 echo ""
