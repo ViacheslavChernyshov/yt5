@@ -80,8 +80,9 @@ COPY --from=build-whisper /build/build/bin/whisper-cli /app/whisper/whisper-cli
 RUN chmod a+x /app/whisper/whisper-cli
 
 # Copy CUDA libraries needed at runtime (whisper.cpp links against them)
-COPY --from=build-whisper /build/build/src/libwhisper.so /usr/local/lib/
-COPY --from=build-whisper /build/build/ggml/src/libggml*.so /usr/local/lib/
+# Use broad globs to capture versioned .so files (e.g., libggml-cuda.so.0)
+COPY --from=build-whisper /build/build/src/libwhisper.so* /usr/local/lib/
+COPY --from=build-whisper /build/build/ggml/src/libggml*.so* /usr/local/lib/
 RUN ldconfig
 
 # Download whisper large-v3 GGML model
