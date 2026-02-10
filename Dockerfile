@@ -11,13 +11,24 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone whisper.cpp and build with CUDA
-RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git . && \
-    cmake -B build \
-        -DGGML_CUDA=1 \
-        -DCMAKE_CUDA_ARCHITECTURES="60;70;75;80;86;89;90" \
-        -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build build --config Release -j$(nproc) --target whisper-cli
+# Clone whisper.cpp - this layer will be cached
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git .
+
+# Use CUDA stubs for linking (fixes libcuda.so.1 not found)
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && echo "/usr/local/cuda/lib64/stubs" > /etc/ld.so.conf.d/z-cuda-stubs.conf \
+    && ldconfig
+
+
+# Configure CMake - this layer will be cached
+RUN cmake -B build \
+    -DGGML_CUDA=1 \
+    -DCMAKE_CUDA_ARCHITECTURES="50" \
+    -DCMAKE_BUILD_TYPE=Release
+
+# Build whisper-cli - this is the long step
+# If interrupted, you only restart this step, not the clone/config
+RUN cmake --build build --config Release -j$(nproc) --target whisper-cli
 
 # =============================================================================
 # Stage 2: Build Java Application
@@ -86,20 +97,20 @@ COPY llama/models/* /app/llama/models/
 RUN mkdir -p /tmp/llama_extract && cd /tmp/llama_extract && \
     echo "Attempting to download Llama.cpp binary..." && \
     if curl -fSL --max-time 120 --retry 2 https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip -o llama.zip; then \
-        echo "Downloaded successfully, extracting..."; \
-        if unzip -q llama.zip 2>/dev/null; then \
-            echo "Extracted, searching for executable..."; \
-            if find . -type f -executable ! -name "*.so*" -print | head -1 | xargs -I {} cp {} /app/llama/main 2>/dev/null; then \
-                chmod a+x /app/llama/main; \
-                echo "Llama binary installed successfully"; \
-            else \
-                echo "Warning: No executable found in archive, skipping binary installation"; \
-            fi; \
-        else \
-            echo "Warning: Failed to extract llama.zip"; \
-        fi; \
+    echo "Downloaded successfully, extracting..."; \
+    if unzip -q llama.zip 2>/dev/null; then \
+    echo "Extracted, searching for executable..."; \
+    if find . -type f -executable ! -name "*.so*" -print | head -1 | xargs -I {} cp {} /app/llama/main 2>/dev/null; then \
+    chmod a+x /app/llama/main; \
+    echo "Llama binary installed successfully"; \
     else \
-        echo "Warning: Failed to download Llama binary, will use CPU-only mode"; \
+    echo "Warning: No executable found in archive, skipping binary installation"; \
+    fi; \
+    else \
+    echo "Warning: Failed to extract llama.zip"; \
+    fi; \
+    else \
+    echo "Warning: Failed to download Llama binary, will use CPU-only mode"; \
     fi; \
     rm -rf /tmp/llama_extract
 
