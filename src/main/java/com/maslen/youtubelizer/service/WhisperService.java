@@ -351,13 +351,14 @@ public class WhisperService {
 
         // GPU support
         if (useGpu) {
-            command.add("--gpu");
+            command.add("--device");
             command.add(String.valueOf(gpuDevice));
+        } else {
+            command.add("--no-gpu");
         }
 
-        // Output control
-        command.add("--no-prints"); // suppress model info
-        command.add("-np"); // no progress bar
+        // Output control: -np suppresses non-result output
+        command.add("-np");
 
         return command;
     }
@@ -367,6 +368,12 @@ public class WhisperService {
      */
     private String fallbackParsing(String output) {
         log.warn("[WHISPER] Основной парсинг не нашёл текста, пробуем запасной...");
+
+        // Detect if output is actually a help/usage message (not transcription)
+        if (output.contains("usage:") && output.contains("--help")) {
+            log.error("[WHISPER] Вывод содержит usage/help — whisper-cli получил неверные аргументы");
+            return "";
+        }
 
         StringBuilder result = new StringBuilder();
 
@@ -390,18 +397,25 @@ public class WhisperService {
             String[] lines = output.split("\n");
             for (String line : lines) {
                 line = line.trim();
-                // Skip log lines and empty lines
+                // Skip log lines, empty lines, and CLI option descriptions
                 if (!line.isEmpty()
                         && !line.startsWith("whisper_")
                         && !line.startsWith("ggml_")
                         && !line.startsWith("main:")
                         && !line.startsWith("system_info:")
+                        && !line.startsWith("-")
+                        && !line.startsWith("error:")
+                        && !line.startsWith("options:")
+                        && !line.startsWith("supported")
                         && !line.contains("auto-detected")
-                        && !line.contains("processing")) {
+                        && !line.contains("processing")
+                        && !line.contains("--")) {
                     result.append(line).append(" ");
                 }
             }
-            log.warn("[WHISPER] Все паттерны вернули пусто, вывод: {}", output);
+            if (result.toString().trim().isEmpty()) {
+                log.warn("[WHISPER] Все паттерны вернули пусто, вывод: {}", output);
+            }
         }
 
         return result.toString().trim();
