@@ -39,7 +39,6 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     volumes:
       - ./downloads:/app/downloads
-      - ./llama:/app/llama
     depends_on:
       postgres:
         condition: service_healthy
