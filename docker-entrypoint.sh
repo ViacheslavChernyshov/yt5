@@ -48,6 +48,32 @@ else
 fi
 
 echo ""
+echo "[3/4] Verifying llama.cpp..."
+LLAMA_PATH="${APP_LLAMA_PATH:-/app/llama/llama-server}"
+LLAMA_MODEL="${APP_LLAMA_MODEL_PATH:-/app/llama/models/qwen2.5-7b-instruct-q3_k_m.gguf}"
+
+if [ -x "$LLAMA_PATH" ]; then
+    echo "  ✅ llama-server binary found: $LLAMA_PATH"
+    # Check for missing shared libraries
+    MISSING_LIBS=$(ldd "$LLAMA_PATH" 2>&1 | grep "not found" || true)
+    if [ -n "$MISSING_LIBS" ]; then
+        echo "  ⚠️  Missing shared libraries for llama-server:"
+        echo "$MISSING_LIBS" | sed 's/^/    /'
+    else
+        echo "  ✅ All shared libraries resolved for llama-server"
+    fi
+else
+    echo "  ❌ llama-server binary NOT found at: $LLAMA_PATH"
+fi
+
+if [ -f "$LLAMA_MODEL" ]; then
+    MODEL_SIZE=$(du -sh "$LLAMA_MODEL" | cut -f1)
+    echo "  ✅ Llama model found: $LLAMA_MODEL ($MODEL_SIZE)"
+else
+    echo "  ❌ Llama model NOT found at: $LLAMA_MODEL"
+fi
+
+echo ""
 echo "[3/3] Starting YouTubeLizer application..."
 echo "  Server: http://localhost:8080"
 echo "=========================================="

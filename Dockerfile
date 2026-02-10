@@ -37,7 +37,53 @@ RUN mkdir -p /build/collected_libs \
     && ls -la /build/collected_libs/
 
 # =============================================================================
-# Stage 2: Build Java Application
+# Stage 2: Build Llama.cpp with CUDA support
+# =============================================================================
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS build-llama
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone llama.cpp
+# Using a specific tag or commit hash is often safer for reproducibility, 
+# but for now we'll use master/latest to get recent fixes
+RUN git clone https://github.com/ggml-org/llama.cpp.git .
+
+# Use CUDA stubs for linking (fixes libcuda.so.1 not found)
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && echo "/usr/local/cuda/lib64/stubs" > /etc/ld.so.conf.d/z-cuda-stubs.conf \
+    && ldconfig
+
+# Configure CMake
+RUN cmake -B build \
+    -DGGML_CUDA=1 \
+    -DCMAKE_CUDA_ARCHITECTURES="50;61;70;75;80;86;89" \
+    -DCMAKE_BUILD_TYPE=Release
+
+# Build llama-server
+RUN cmake --build build --config Release -j$(nproc) --target llama-server
+
+# Collect all shared libraries into a single flat directory
+RUN mkdir -p /build/collected_libs \
+    && find /build/build -name '*.so' -o -name '*.so.*' | while read f; do cp -P "$f" /build/collected_libs/; done \
+    && ls -la /build/collected_libs/
+
+# Download Qwen2.5-7B-Instruct-Q3_K_M GGUF model (~3.5GB)
+RUN mkdir -p /build/models && \
+    echo "Downloading Qwen2.5-7B-Instruct-Q3_K_M model..." && \
+    wget -q --show-progress -O /build/models/qwen2.5-7b-instruct-q3_k_m.gguf \
+    "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q3_k_m.gguf" && \
+    echo "Model downloaded successfully"
+
+# =============================================================================
+# Stage 3: Build Java Application
 # =============================================================================
 FROM maven:3.9.6-eclipse-temurin-21 AS build-java
 
@@ -47,7 +93,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # =============================================================================
-# Stage 3: Runtime
+# Stage 4: Runtime
 # =============================================================================
 FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
@@ -81,43 +127,33 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 RUN mkdir -p /app/downloads /app/llama /app/llama/models /app/whisper /app/temp \
     && chmod -R 777 /app
 
-# Copy whisper-cli binary from build stage
+# --- Whisper.cpp setup ---
+# Copy whisper-cli binary
 COPY --from=build-whisper /build/build/bin/whisper-cli /app/whisper/whisper-cli
 RUN chmod a+x /app/whisper/whisper-cli
 
-# Copy all whisper.cpp/ggml shared libraries from collected flat directory
+# Copy whisper libs
 COPY --from=build-whisper /build/collected_libs/ /usr/local/lib/
-RUN ldconfig
 
-# Download whisper large-v3 GGML model
+# Download whisper model
 RUN echo "Downloading whisper large-v3 GGML model (~3GB)..." && \
     wget -q --show-progress -O /app/whisper/ggml-large-v3.bin \
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin" && \
     echo "Model downloaded successfully"
 
-# Copy Llama model from build context if it exists
-COPY llama/models/* /app/llama/models/
+# --- Llama.cpp setup ---
+# Copy llama-server binary
+COPY --from=build-llama /build/build/bin/llama-server /app/llama/llama-server
+RUN chmod a+x /app/llama/llama-server
 
-# Try to download Llama.cpp binary
-RUN mkdir -p /tmp/llama_extract && cd /tmp/llama_extract && \
-    echo "Attempting to download Llama.cpp binary..." && \
-    if curl -fSL --max-time 120 --retry 2 https://github.com/ggml-org/llama.cpp/releases/download/b7240/llama-b7240-bin-ubuntu-x64.zip -o llama.zip; then \
-    echo "Downloaded successfully, extracting..."; \
-    if unzip -q llama.zip 2>/dev/null; then \
-    echo "Extracted, searching for executable..."; \
-    if find . -type f -executable ! -name "*.so*" -print | head -1 | xargs -I {} cp {} /app/llama/main 2>/dev/null; then \
-    chmod a+x /app/llama/main; \
-    echo "Llama binary installed successfully"; \
-    else \
-    echo "Warning: No executable found in archive, skipping binary installation"; \
-    fi; \
-    else \
-    echo "Warning: Failed to extract llama.zip"; \
-    fi; \
-    else \
-    echo "Warning: Failed to download Llama binary, will use CPU-only mode"; \
-    fi; \
-    rm -rf /tmp/llama_extract
+# Copy llama libs (merging with whisper libs in /usr/local/lib)
+COPY --from=build-llama /build/collected_libs/ /usr/local/lib/
+
+# Copy Llama model
+COPY --from=build-llama /build/models/qwen2.5-7b-instruct-q3_k_m.gguf /app/llama/models/
+
+# Update linker cache
+RUN ldconfig
 
 # Copy JAR from Java build stage
 COPY --from=build-java /app/target/*.jar app.jar

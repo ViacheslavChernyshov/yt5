@@ -41,7 +41,7 @@ public class LlamaService {
     private void initializePaths() {
         // Initialize llama server path
         if (llamaPath == null || llamaPath.isEmpty()) {
-            String binaryName = isWindows() ? "llama-server.exe" : "main";
+            String binaryName = isWindows() ? "llama-server.exe" : "llama-server";
             llamaPath = Paths.get("llama", binaryName).toAbsolutePath().normalize().toString();
         } else if (!Paths.get(llamaPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
@@ -50,10 +50,11 @@ public class LlamaService {
             // Normalize absolute paths to remove redundant components
             llamaPath = Paths.get(llamaPath).normalize().toString();
         }
-        
+
         // Initialize model path
         if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().normalize().toString();
+            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().normalize()
+                    .toString();
         } else if (!Paths.get(modelPath).isAbsolute()) {
             // Convert relative paths to absolute paths relative to application root
             modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
@@ -61,7 +62,7 @@ public class LlamaService {
             // Normalize absolute paths to remove redundant components
             modelPath = Paths.get(modelPath).normalize().toString();
         }
-        
+
         log.info("[LLAMA] Initialized paths - server: {}, model: {}", llamaPath, modelPath);
     }
 
@@ -132,8 +133,8 @@ public class LlamaService {
         // Check if binary exists before attempting to start
         Path exePath = Paths.get(llamaPath);
         if (Files.notExists(exePath)) {
-            throw new IOException("[LLAMA] Binary not found at: " + llamaPath + 
-                ". Please install llama.cpp or provide the binary path.");
+            throw new IOException("[LLAMA] Binary not found at: " + llamaPath +
+                    ". Please install llama.cpp or provide the binary path.");
         }
 
         serverStarting = true;
@@ -145,11 +146,11 @@ public class LlamaService {
                     "-m", modelPath,
                     "--port", String.valueOf(serverPort),
                     "--host", "0.0.0.0",
-                    "-c", "1024",  // Context window: 1024 tokens saves ~3.5GB memory
-                    "-t", "2",     // Reduced threads to 2 for memory efficiency
-                    "--flash-attn",  // More efficient attention computation
-                    "-ngl", "0",     // CPU-only mode
-                    "--no-mmap"      // Lower peak memory on repeated calls
+                    "-c", "1024", // Context window: 1024 tokens saves ~3.5GB memory
+                    "-t", "2", // Reduced threads to 2 for memory efficiency
+                    "--flash-attn", // More efficient attention computation
+                    "-ngl", "0", // CPU-only mode
+                    "--no-mmap" // Lower peak memory on repeated calls
             );
 
             pb.redirectErrorStream(true);
