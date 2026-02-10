@@ -30,6 +30,12 @@ RUN cmake -B build \
 # If interrupted, you only restart this step, not the clone/config
 RUN cmake --build build --config Release -j$(nproc) --target whisper-cli
 
+# Collect all shared libraries into a single flat directory for easy COPY
+# (Docker COPY globs don't recurse into subdirectories)
+RUN mkdir -p /build/collected_libs \
+    && find /build/build -name '*.so' -o -name '*.so.*' | while read f; do cp -P "$f" /build/collected_libs/; done \
+    && ls -la /build/collected_libs/
+
 # =============================================================================
 # Stage 2: Build Java Application
 # =============================================================================
@@ -79,10 +85,8 @@ RUN mkdir -p /app/downloads /app/llama /app/llama/models /app/whisper /app/temp 
 COPY --from=build-whisper /build/build/bin/whisper-cli /app/whisper/whisper-cli
 RUN chmod a+x /app/whisper/whisper-cli
 
-# Copy CUDA libraries needed at runtime (whisper.cpp links against them)
-# Use broad globs to capture versioned .so files (e.g., libggml-cuda.so.0)
-COPY --from=build-whisper /build/build/src/libwhisper.so* /usr/local/lib/
-COPY --from=build-whisper /build/build/ggml/src/libggml*.so* /usr/local/lib/
+# Copy all whisper.cpp/ggml shared libraries from collected flat directory
+COPY --from=build-whisper /build/collected_libs/ /usr/local/lib/
 RUN ldconfig
 
 # Download whisper large-v3 GGML model

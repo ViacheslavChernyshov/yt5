@@ -20,6 +20,14 @@ MODEL_PATH="${APP_WHISPER_MODEL_PATH:-/app/whisper/ggml-large-v3.bin}"
 
 if [ -x "$WHISPER_PATH" ]; then
     echo "  ✅ whisper-cli binary found: $WHISPER_PATH"
+    # Check for missing shared libraries
+    MISSING_LIBS=$(ldd "$WHISPER_PATH" 2>&1 | grep "not found" || true)
+    if [ -n "$MISSING_LIBS" ]; then
+        echo "  ⚠️  Missing shared libraries:"
+        echo "$MISSING_LIBS" | sed 's/^/    /'
+    else
+        echo "  ✅ All shared libraries resolved"
+    fi
 else
     echo "  ❌ whisper-cli binary NOT found at: $WHISPER_PATH"
 fi
