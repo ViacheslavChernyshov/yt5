@@ -148,8 +148,7 @@ public class LlamaService {
                     "--host", "0.0.0.0",
                     "-c", "1024", // Context window: 1024 tokens saves ~3.5GB memory
                     "-t", "2", // Reduced threads to 2 for memory efficiency
-                    "--flash-attn", // More efficient attention computation
-                    "-ngl", "0", // CPU-only mode
+                    "--flash-attn", "off", // Disable flash attention for compatibility
                     "--no-mmap" // Lower peak memory on repeated calls
             );
 
