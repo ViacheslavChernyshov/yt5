@@ -62,3 +62,10 @@ logs/
 .env
 .env.local
 application-local.properties
+
+# Project Specific Secrets
+.env
+deploy-config.ps1
+
+# Large Artifacts
+*.tar

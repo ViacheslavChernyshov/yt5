@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -36,6 +38,9 @@ public class LlamaService {
 
     @Value("${app.llama.threads:20}")
     private int threads;
+
+    @Value("${app.llama.extra-params:}")
+    private String extraParams;
 
     @PostConstruct
     private void initializePaths() {
@@ -141,16 +146,33 @@ public class LlamaService {
         try {
             log.info("[LLAMA] Starting llama-server on port {}...", serverPort);
 
-            ProcessBuilder pb = new ProcessBuilder(
-                    llamaPath,
-                    "-m", modelPath,
-                    "--port", String.valueOf(serverPort),
-                    "--host", "0.0.0.0",
-                    "-c", "1024", // Context window: 1024 tokens saves ~3.5GB memory
-                    "-t", "2", // Reduced threads to 2 for memory efficiency
-                    "--flash-attn", "off", // Disable flash attention for compatibility
-                    "--no-mmap" // Lower peak memory on repeated calls
-            );
+            List<String> command = new ArrayList<>();
+            command.add(llamaPath);
+            command.add("-m");
+            command.add(modelPath);
+            command.add("--port");
+            command.add(String.valueOf(serverPort));
+            command.add("--host");
+            command.add("0.0.0.0");
+            command.add("-c");
+            command.add("1024");
+            command.add("-t");
+            command.add(String.valueOf(threads));
+            command.add("--flash-attn");
+            command.add("off");
+            command.add("--no-mmap");
+
+            // Add extra params if present
+            if (extraParams != null && !extraParams.isBlank()) {
+                String[] parts = extraParams.split("\\s+");
+                for (String part : parts) {
+                    if (!part.isBlank()) {
+                        command.add(part);
+                    }
+                }
+            }
+
+            ProcessBuilder pb = new ProcessBuilder(command);
 
             pb.redirectErrorStream(true);
             serverProcess = pb.start();

@@ -358,7 +358,7 @@ public class WhisperService {
         }
 
         // Output control: -np suppresses non-result output
-        command.add("-np");
+        // command.add("-np");
 
         return command;
     }
