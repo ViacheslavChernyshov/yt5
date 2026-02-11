@@ -1,5 +1,6 @@
 package com.maslen.youtubelizer.service;
 
+import com.maslen.youtubelizer.util.PathUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -8,7 +9,6 @@ import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 @Slf4j
 @Service
@@ -19,17 +19,7 @@ public class YtDlpService {
 
     @PostConstruct
     private void initializePath() {
-        if (ytDlpPath == null || ytDlpPath.isEmpty()) {
-            // Use system command which should be in PATH
-            ytDlpPath = "yt-dlp";
-        } else if (!Paths.get(ytDlpPath).isAbsolute()) {
-            // Convert relative paths to absolute paths relative to application root
-            ytDlpPath = Paths.get(ytDlpPath).toAbsolutePath().normalize().toString();
-        } else {
-            // Normalize absolute paths to remove redundant components
-            ytDlpPath = Paths.get(ytDlpPath).normalize().toString();
-        }
-        
+        ytDlpPath = PathUtils.resolvePath(ytDlpPath, "yt-dlp");
         log.info("[YTDLP] Initialized path: {}", ytDlpPath);
     }
 

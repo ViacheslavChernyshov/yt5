@@ -59,13 +59,26 @@ logs/
 *.sqlite
 
 ### Secrets & Environment ###
+# Standard env files
 .env
-.env.local
-application-local.properties
+.env.*
+!.env.example
 
-# Project Specific Secrets
-.env
+# Development & Deployment secrets
+local.env
 deploy-config.ps1
+application-local.properties
+src/main/resources/application-local.properties
+local.properties
+
+# Local automation scripts (containing environment DNA)
+deploy-full-local.ps1
+stop-remote.ps1
+db-truncate-tables.ps1
+*.sh
+!setup-and-run.sh
+!docker-entrypoint.sh
 
 # Large Artifacts
 *.tar
+*.zip

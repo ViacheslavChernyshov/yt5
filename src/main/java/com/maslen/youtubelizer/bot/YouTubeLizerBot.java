@@ -2,30 +2,31 @@ package com.maslen.youtubelizer.bot;
 
 import com.maslen.youtubelizer.entity.Channel;
 import com.maslen.youtubelizer.entity.DownloadTask;
-import com.maslen.youtubelizer.entity.Request;
 import com.maslen.youtubelizer.model.TaskStatus;
 import com.maslen.youtubelizer.model.TaskType;
 import com.maslen.youtubelizer.repository.DownloadTaskRepository;
+import com.maslen.youtubelizer.service.TelegramNotificationService;
 import com.maslen.youtubelizer.service.YouTubeService;
-import com.maslen.youtubelizer.service.YtDlpService;
+import com.maslen.youtubelizer.service.TaskSchedulerService;
+import com.maslen.youtubelizer.service.MessageService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import com.maslen.youtubelizer.service.MessageService;
-import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.AnswerPreCheckoutQuery;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.payments.PreCheckoutQuery;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import jakarta.annotation.PostConstruct;
@@ -34,36 +35,41 @@ import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @Slf4j
 public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
     private final TelegramClient telegramClient;
+    private final TelegramNotificationService notificationService;
     private final String botToken;
+    private final YouTubeService youTubeService;
+    private final DownloadTaskRepository downloadTaskRepository;
+    private final MessageService messageService;
+    private final TaskSchedulerService taskSchedulerService;
+
     private TelegramBotsLongPollingApplication botsApplication;
 
-    @Autowired
-    private YouTubeService youTubeService;
-
-    @Autowired
-    private YtDlpService ytDlpService;
-
-    @Autowired
-    private DownloadTaskRepository downloadTaskRepository;
-
-    @Autowired
-    private MessageService messageService;
-
-    @Autowired
-    private com.maslen.youtubelizer.service.TaskSchedulerService taskSchedulerService;
-
     // Track users waiting to enter custom donation amount: chatId -> languageCode
-    private final java.util.Map<Long, String> pendingDonationUsers = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Long, String> pendingDonationUsers = new ConcurrentHashMap<>();
 
-    public YouTubeLizerBot(@Value("${telegram.bot.token}") String botToken, TelegramClient telegramClient) {
+    public YouTubeLizerBot(
+            @Value("${telegram.bot.token}") String botToken,
+            TelegramClient telegramClient,
+            TelegramNotificationService notificationService,
+            YouTubeService youTubeService,
+            DownloadTaskRepository downloadTaskRepository,
+            MessageService messageService,
+            TaskSchedulerService taskSchedulerService) {
         this.botToken = botToken;
         this.telegramClient = telegramClient;
+        this.notificationService = notificationService;
+        this.youTubeService = youTubeService;
+        this.downloadTaskRepository = downloadTaskRepository;
+        this.messageService = messageService;
+        this.taskSchedulerService = taskSchedulerService;
     }
 
     @PostConstruct
@@ -106,20 +112,15 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             }
 
             if (messageText.equals("/start") || messageText.equals("/help")) {
-                sendMessage(chatId, messageService.getMessage("bot.welcome", languageCode));
+                notificationService.sendMessage(chatId, messageService.getMessage("bot.welcome", languageCode));
             } else if (youTubeService.isValidYouTubeLink(messageText)) {
-                // Логируем запрос
                 String videoId = youTubeService.extractVideoId(messageText);
-                Request request = youTubeService.createRequest(userId, userName, messageText, true, messageText,
-                        videoId, null);
 
                 try {
                     // Извлекаем информацию о канале
                     Channel channel = youTubeService.processYouTubeUrl(messageText);
 
-                    // Обновляем запрос информацией о канале
-                    request.setChannel(channel);
-                    // Сохраняем обновленный запрос
+                    // Создаём запрос один раз — уже с информацией о канале
                     youTubeService.createRequest(userId, userName, messageText, true, messageText, videoId, channel);
 
                     sendMessageWithKeyboard(
@@ -136,13 +137,14 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                     // Логируем невалидный запрос
                     youTubeService.createRequest(userId, userName, messageText, false, messageText, videoId, null);
 
-                    sendMessage(chatId, messageService.getMessage("common.error", languageCode) + e.getMessage());
+                    notificationService.sendMessage(chatId,
+                            messageService.getMessage("common.error", languageCode) + e.getMessage());
                 }
             } else {
                 // Log invalid request
                 youTubeService.createRequest(userId, userName, messageText, false, messageText, null, null);
 
-                sendMessage(chatId, messageService.getMessage("bot.invalid_link", languageCode));
+                notificationService.sendMessage(chatId, messageService.getMessage("bot.invalid_link", languageCode));
             }
         } else if (update.hasCallbackQuery()) {
             handleCallbackQuery(update.getCallbackQuery());
@@ -152,19 +154,6 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         } else if (update.hasMessage() && update.getMessage().hasSuccessfulPayment()) {
             // Handle successful payment
             handleSuccessfulPayment(update.getMessage());
-        }
-    }
-
-    private void sendMessage(long chatId, String text) {
-        SendMessage message = SendMessage.builder()
-                .chatId(chatId)
-                .text(text)
-                .build();
-        try {
-            telegramClient.execute(message);
-            log.debug("[BOT] Сообщение отправлено в чат {}", chatId);
-        } catch (TelegramApiException e) {
-            log.error("[BOT] Не удалось отправить сообщение: {}", e.getMessage(), e);
         }
     }
 
@@ -180,16 +169,16 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         } catch (TelegramApiException e) {
             log.error("[BOT] Не удалось отправить сообщение с клавиатурой: {}", e.getMessage(), e);
             // Запасной вариант: отправка обычного сообщения
-            sendMessage(chatId, text);
+            notificationService.sendMessage(chatId, text);
         }
     }
 
     private InlineKeyboardMarkup createProcessingOptionsKeyboard(String videoId, String languageCode) {
         // Создаем клавиатуру, используя правильную структуру для этой версии библиотеки
-        List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow> keyboard = new ArrayList<>();
+        List<InlineKeyboardRow> keyboard = new ArrayList<>();
 
         // Первый ряд: Скачать видео и Скачать аудио
-        org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row1 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
+        InlineKeyboardRow row1 = new InlineKeyboardRow();
         row1.add(InlineKeyboardButton.builder()
                 .text(messageService.getMessage("bot.button.video", languageCode))
                 .callbackData("download_video:" + videoId)
@@ -201,7 +190,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         keyboard.add(row1);
 
         // Второй ряд: Распознавание речи и Нормализация текста
-        org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row2 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
+        InlineKeyboardRow row2 = new InlineKeyboardRow();
         row2.add(InlineKeyboardButton.builder()
                 .text(messageService.getMessage("bot.button.text", languageCode))
                 .callbackData("speech_recognition:" + videoId)
@@ -213,7 +202,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         keyboard.add(row2);
 
         // Третий ряд: Выполнить все и запаковать в ZIP
-        org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow row3 = new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow();
+        InlineKeyboardRow row3 = new InlineKeyboardRow();
         row3.add(InlineKeyboardButton.builder()
                 .text(messageService.getMessage("bot.button.zip", languageCode))
                 .callbackData("process_all_zip:" + videoId)
@@ -277,11 +266,11 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         }
 
         // Отправка ответа пользователю
-        sendMessage(chatId, responseText);
+        notificationService.sendMessage(chatId, responseText);
 
         // Ответ на callback query, чтобы убрать индикатор загрузки
         try {
-            telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
+            telegramClient.execute(AnswerCallbackQuery.builder()
                     .callbackQueryId(callbackQuery.getId())
                     .text(responseText)
                     .showAlert(false)
@@ -310,12 +299,13 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
 
         if (existingTaskOpt.isPresent()) {
             DownloadTask existingTask = existingTaskOpt.get();
-            log.info("Found existing task for videoId: {}, type: {}. Status: {}", videoId, type, existingTask.getStatus());
-            
+            log.info("Found existing task for videoId: {}, type: {}. Status: {}", videoId, type,
+                    existingTask.getStatus());
+
             // Update chat ID and language to the latest request
             existingTask.setChatId(chatId);
             existingTask.setLanguageCode(languageCode);
-            
+
             // Handle task stuck in PROCESSING state
             if (existingTask.getStatus() == TaskStatus.PROCESSING) {
                 LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
@@ -325,24 +315,26 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                     existingTask.setStatus(TaskStatus.PENDING);
                     existingTask.setErrorMessage(null);
                     downloadTaskRepository.save(existingTask);
-                    sendMessage(chatId, messageService.getMessage("bot.task_restarted", languageCode));
+                    notificationService.sendMessage(chatId,
+                            messageService.getMessage("bot.task_restarted", languageCode));
                     return true;
                 } else {
                     // Task was recently set to PROCESSING - notify user to wait
                     log.info("Task already in processing, waiting...");
-                    sendMessage(chatId, messageService.getMessage("bot.task_already_processing", languageCode));
+                    notificationService.sendMessage(chatId,
+                            messageService.getMessage("bot.task_already_processing", languageCode));
                     downloadTaskRepository.save(existingTask);
                     return true;
                 }
             }
-            
+
             // If the task was completed or failed, restart it
             if (existingTask.getStatus() == TaskStatus.COMPLETED || existingTask.getStatus() == TaskStatus.FAILED) {
                 log.info("Restarting task for videoId: {}, type: {}", videoId, type);
                 existingTask.setStatus(TaskStatus.PENDING);
                 existingTask.setErrorMessage(null);
             }
-            
+
             downloadTaskRepository.save(existingTask);
             return true;
         }
@@ -390,7 +382,7 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
                 payment.getTotalAmount(), payment.getCurrency(), message.getFrom().getId());
 
         // Thank the user for their donation
-        sendMessage(chatId, messageService.getMessage("donation.thank_you", languageCode));
+        notificationService.sendMessage(chatId, messageService.getMessage("donation.thank_you", languageCode));
     }
 
     /**
@@ -400,12 +392,12 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             String callbackId) {
         try {
             // Answer the callback query first
-            telegramClient.execute(org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery.builder()
+            telegramClient.execute(AnswerCallbackQuery.builder()
                     .callbackQueryId(callbackId)
                     .build());
 
             // Remove the donation menu
-            telegramClient.execute(org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage.builder()
+            telegramClient.execute(DeleteMessage.builder()
                     .chatId(chatId)
                     .messageId(messageId)
                     .build());
@@ -413,7 +405,8 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
             if ("custom".equals(amountStr)) {
                 // Ask user to enter custom amount
                 pendingDonationUsers.put(chatId, languageCode);
-                sendMessage(chatId, messageService.getMessage("donation.enter_amount", languageCode));
+                notificationService.sendMessage(chatId,
+                        messageService.getMessage("donation.enter_amount", languageCode));
             } else {
                 // Send invoice with selected amount
                 int amount = Integer.parseInt(amountStr);
@@ -438,14 +431,16 @@ public class YouTubeLizerBot implements LongPollingSingleThreadUpdateConsumer {
         try {
             int amount = Integer.parseInt(text.trim());
             if (amount < 1 || amount > 2500) {
-                sendMessage(chatId, messageService.getMessage("donation.invalid_amount", savedLanguageCode));
+                notificationService.sendMessage(chatId,
+                        messageService.getMessage("donation.invalid_amount", savedLanguageCode));
                 pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
                 return true;
             }
 
             taskSchedulerService.sendDonationInvoice(chatId, amount, savedLanguageCode);
         } catch (NumberFormatException e) {
-            sendMessage(chatId, messageService.getMessage("donation.enter_valid_number", savedLanguageCode));
+            notificationService.sendMessage(chatId,
+                    messageService.getMessage("donation.enter_valid_number", savedLanguageCode));
             pendingDonationUsers.put(chatId, savedLanguageCode); // Put back for retry
         }
 

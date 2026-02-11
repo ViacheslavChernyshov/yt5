@@ -33,8 +33,8 @@ public class MessageService {
         }
 
         return switch (langCode.toLowerCase()) {
-            case "ru" -> new Locale("ru");
-            case "uk", "ua" -> new Locale("uk");
+            case "ru" -> Locale.of("ru");
+            case "uk", "ua" -> Locale.of("uk");
             default -> Locale.ENGLISH;
         };
     }

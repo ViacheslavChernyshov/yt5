@@ -1,5 +1,7 @@
 package com.maslen.youtubelizer.service;
 
+import com.maslen.youtubelizer.model.TranscriptionResult;
+import com.maslen.youtubelizer.util.PathUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,8 @@ import java.util.regex.Pattern;
 @Service
 public class WhisperService {
 
+    private final FfmpegService ffmpegService;
+
     @Value("${app.whisper.path:}")
     private String whisperPath;
 
@@ -43,9 +47,6 @@ public class WhisperService {
     @Value("${app.whisper.gpu-device:0}")
     private int gpuDevice;
 
-    @Value("${app.ffmpeg.path:ffmpeg}")
-    private String ffmpegPath;
-
     /**
      * Regex для парсинга временных меток whisper.cpp: [HH:MM:SS.mmm -->
      * HH:MM:SS.mmm] Text
@@ -60,25 +61,14 @@ public class WhisperService {
     /** Таймаут транскрипции — 30 минут */
     private static final long TRANSCRIPTION_TIMEOUT_MINUTES = 30;
 
+    public WhisperService(FfmpegService ffmpegService) {
+        this.ffmpegService = ffmpegService;
+    }
+
     @PostConstruct
     private void initializePaths() {
-        // Whisper binary path
-        if (whisperPath == null || whisperPath.isEmpty()) {
-            whisperPath = "whisper-cli";
-        } else if (!Paths.get(whisperPath).isAbsolute()) {
-            whisperPath = Paths.get(whisperPath).toAbsolutePath().normalize().toString();
-        } else {
-            whisperPath = Paths.get(whisperPath).normalize().toString();
-        }
-
-        // Model path
-        if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("/app/whisper/ggml-large-v3.bin").toString();
-        } else if (!Paths.get(modelPath).isAbsolute()) {
-            modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
-        } else {
-            modelPath = Paths.get(modelPath).normalize().toString();
-        }
+        whisperPath = PathUtils.resolvePath(whisperPath, "whisper-cli");
+        modelPath = PathUtils.resolvePath(modelPath, Paths.get("/app/whisper/ggml-large-v3.bin").toString());
 
         log.info("[WHISPER] whisper-cli path: {}", whisperPath);
         log.info("[WHISPER] Model path: {}", modelPath);
@@ -142,8 +132,8 @@ public class WhisperService {
      * @throws InterruptedException Если процесс был прерван
      */
     public String transcribe(File audioFile) throws IOException, InterruptedException {
-        Object[] result = transcribeWithLanguage(audioFile);
-        return (String) result[0];
+        TranscriptionResult result = transcribeWithLanguage(audioFile);
+        return result.text();
     }
 
     /**
@@ -157,15 +147,15 @@ public class WhisperService {
      * 4. Очистка временных файлов
      *
      * @param audioFile Путь к аудиофайлу для транскрипции
-     * @return Массив объектов с [транскрипция, язык]
+     * @return TranscriptionResult с транскрипцией и языком
      * @throws IOException          Если возникла проблема с файловыми операциями
      * @throws InterruptedException Если процесс был прерван
      */
-    public Object[] transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
+    public TranscriptionResult transcribeWithLanguage(File audioFile) throws IOException, InterruptedException {
         log.info("[WHISPER] Начало транскрипции: {}", audioFile.getAbsolutePath());
 
         // Step 1: Convert to WAV 16kHz mono (whisper.cpp requirement)
-        File wavFile = convertToWav(audioFile);
+        File wavFile = ffmpegService.convertToWav(audioFile);
 
         Process process = null;
         try {
@@ -234,7 +224,7 @@ public class WhisperService {
             log.info("[WHISPER] Транскрипция завершена. Язык: {}, длина: {} символов",
                     detectedLanguage, transcription.length());
 
-            return new Object[] { transcription, detectedLanguage };
+            return new TranscriptionResult(transcription, detectedLanguage);
 
         } catch (InterruptedException e) {
             // Properly handle interruption
@@ -254,64 +244,6 @@ public class WhisperService {
             // Cleanup WAV file
             cleanupWavFile(wavFile, audioFile);
         }
-    }
-
-    /**
-     * Конвертирует аудиофайл в WAV 16kHz mono с использованием ffmpeg.
-     * whisper.cpp работает оптимально с WAV PCM 16-bit, 16kHz, mono.
-     */
-    private File convertToWav(File audioFile) throws IOException, InterruptedException {
-        String inputPath = audioFile.getAbsolutePath();
-
-        // If already a 16kHz WAV, skip conversion
-        if (inputPath.endsWith(".wav")) {
-            log.debug("[WHISPER] Файл уже в формате WAV, пропускаем конвертацию");
-            return audioFile;
-        }
-
-        // Create WAV file path
-        String wavPath = inputPath.replaceAll("\\.[^.]+$", "") + "_16k.wav";
-        File wavFile = new File(wavPath);
-
-        log.info("[WHISPER] Конвертация {} -> WAV 16kHz mono...", audioFile.getName());
-
-        ProcessBuilder pb = new ProcessBuilder(
-                ffmpegPath,
-                "-i", inputPath,
-                "-ar", "16000", // 16kHz sample rate
-                "-ac", "1", // mono channel
-                "-c:a", "pcm_s16le", // 16-bit PCM
-                "-y", // overwrite output
-                wavPath);
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-
-        // Read output to prevent pipe blocking
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                log.debug("[FFMPEG] {}", line);
-            }
-        }
-
-        boolean finished = p.waitFor(5, TimeUnit.MINUTES);
-        if (!finished) {
-            p.destroyForcibly();
-            throw new IOException("ffmpeg конвертация превысила таймаут 5 минут");
-        }
-
-        if (p.exitValue() != 0) {
-            throw new IOException("ffmpeg конвертация завершилась с ошибкой, код: " + p.exitValue());
-        }
-
-        if (!wavFile.exists() || wavFile.length() == 0) {
-            throw new IOException("ffmpeg не создал WAV файл: " + wavPath);
-        }
-
-        log.info("[WHISPER] Конвертация завершена: {} ({} MB)",
-                wavFile.getName(), wavFile.length() / (1024 * 1024));
-
-        return wavFile;
     }
 
     /**

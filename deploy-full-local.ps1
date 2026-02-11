@@ -1,19 +1,31 @@
 # Complete local deployment script
 # Build JAR locally -> Build Docker image locally -> Deploy to remote server
 
-$RemoteHost = "192.168.4.42"
-$RemoteUser = "user"
-$RemotePassword = "1qaz2wsx"
+$RemoteHost = "your_server_ip"
+$RemoteUser = "your_user"
+$RemotePassword = "your_password"
+
+# Default configuration
+$LocalProjectPath = "."
+$RemoteProjectPath = "/home/user/apps/youtubelizer"
+$ImageName = "youtubelizer"
+$ImageTag = "latest"
+$ImageFile = "youtubelizer-image.tar"
+
 # Load configuration
 if (Test-Path "deploy-config.ps1") {
     . ".\deploy-config.ps1"
+    # Map config variables if they exist (handling different naming conventions)
+    if ($REMOTE_HOST) { $RemoteHost = $REMOTE_HOST }
+    if ($REMOTE_USER) { $RemoteUser = $REMOTE_USER }
+    if ($REMOTE_PW) { $RemotePassword = $REMOTE_PW }
 }
 else {
-    Write-Host "Error: deploy-config.ps1 not found! Please create it from deploy-config.ps1.example." -ForegroundColor Red
-    exit 1
+    Write-Warning "deploy-config.ps1 not found! Using default configuration."
 }
 
 Write-Host "=== Complete Local Build + Remote Deploy ===" -ForegroundColor Green
+Write-Host "Target: ${RemoteUser}@${RemoteHost}:${RemoteProjectPath}" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Build JAR locally
@@ -95,8 +107,20 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Docker image uploaded successfully!" -ForegroundColor Green
 Write-Host ""
 
-# Step 4.1: Upload docker-compose.prod.yml to remote server
-Write-Host "Step 4.1: Uploading docker-compose.prod.yml to remote server..." -ForegroundColor Cyan
+
+# Step 4.1: Upload .env to remote server
+
+# Step 4.1: Upload .env to remote server
+Write-Host "Step 4.1: Uploading .env to remote server..." -ForegroundColor Cyan
+if (Test-Path ".env") {
+    pscp -pw $RemotePassword -batch .env "${RemoteUser}@${RemoteHost}:${RemoteProjectPath}/"
+}
+else {
+    Write-Warning ".env file not found locally! Skipping upload. Remote app might fail if not configured."
+}
+
+# Step 4.2: Upload docker-compose.prod.yml to remote server
+Write-Host "Step 4.2: Uploading docker-compose.prod.yml to remote server..." -ForegroundColor Cyan
 
 pscp -pw $RemotePassword -batch docker-compose.prod.yml "${RemoteUser}@${RemoteHost}:${RemoteProjectPath}/"
 
@@ -109,18 +133,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Configuration uploaded successfully!" -ForegroundColor Green
 Write-Host ""
 
-# Step 5: Load image and start container on remote server
-Write-Host "Step 5: Loading image and starting container on remote server..." -ForegroundColor Cyan
-
-if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
-    Write-Host "ERROR: plink not found! Install PuTTY tools." -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
-
 $RemoteCmd = "cd $RemoteProjectPath && docker load -i $ImageFile && docker-compose -f docker-compose.prod.yml up -d"
-
-plink -pw $RemotePassword "${RemoteUser}@${RemoteHost}" $RemoteCmd
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Docker load/start failed!" -ForegroundColor Red

@@ -1,5 +1,12 @@
 package com.maslen.youtubelizer.service;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maslen.youtubelizer.util.PathUtils;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,59 +28,17 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class LlamaService {
 
-    @Value("${app.llama.path:}")
+    private final ObjectMapper objectMapper;
+    private final String llamaPathConfigured;
+    private final String modelPathConfigured;
+    private final int serverPort;
+    private final String serverHost;
+    private final int serverTimeout;
+    private final int threads;
+    private final String extraParams;
+
     private String llamaPath;
-
-    @Value("${app.llama.model.path:}")
     private String modelPath;
-
-    @Value("${app.llama.server.port:8081}")
-    private int serverPort;
-
-    @Value("${app.llama.server.host:localhost}")
-    private String serverHost;
-
-    @Value("${app.llama.server.timeout:300000}")
-    private int serverTimeout;
-
-    @Value("${app.llama.threads:20}")
-    private int threads;
-
-    @Value("${app.llama.extra-params:}")
-    private String extraParams;
-
-    @PostConstruct
-    private void initializePaths() {
-        // Initialize llama server path
-        if (llamaPath == null || llamaPath.isEmpty()) {
-            String binaryName = isWindows() ? "llama-server.exe" : "llama-server";
-            llamaPath = Paths.get("llama", binaryName).toAbsolutePath().normalize().toString();
-        } else if (!Paths.get(llamaPath).isAbsolute()) {
-            // Convert relative paths to absolute paths relative to application root
-            llamaPath = Paths.get(llamaPath).toAbsolutePath().normalize().toString();
-        } else {
-            // Normalize absolute paths to remove redundant components
-            llamaPath = Paths.get(llamaPath).normalize().toString();
-        }
-
-        // Initialize model path
-        if (modelPath == null || modelPath.isEmpty()) {
-            modelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf").toAbsolutePath().normalize()
-                    .toString();
-        } else if (!Paths.get(modelPath).isAbsolute()) {
-            // Convert relative paths to absolute paths relative to application root
-            modelPath = Paths.get(modelPath).toAbsolutePath().normalize().toString();
-        } else {
-            // Normalize absolute paths to remove redundant components
-            modelPath = Paths.get(modelPath).normalize().toString();
-        }
-
-        log.info("[LLAMA] Initialized paths - server: {}, model: {}", llamaPath, modelPath);
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name").toLowerCase().contains("win");
-    }
 
     private Process serverProcess;
     private volatile boolean serverStarting = false;
@@ -99,13 +64,47 @@ public class LlamaService {
             Исправленный текст:
             """;
 
+    public LlamaService(
+            ObjectMapper objectMapper,
+            @Value("${app.llama.path:}") String llamaPathConfigured,
+            @Value("${app.llama.model.path:}") String modelPathConfigured,
+            @Value("${app.llama.server.port:8081}") int serverPort,
+            @Value("${app.llama.server.host:localhost}") String serverHost,
+            @Value("${app.llama.server.timeout:300000}") int serverTimeout,
+            @Value("${app.llama.threads:20}") int threads,
+            @Value("${app.llama.extra-params:}") String extraParams) {
+        this.objectMapper = objectMapper;
+        this.llamaPathConfigured = llamaPathConfigured;
+        this.modelPathConfigured = modelPathConfigured;
+        this.serverPort = serverPort;
+        this.serverHost = serverHost;
+        this.serverTimeout = serverTimeout;
+        this.threads = threads;
+        this.extraParams = extraParams;
+    }
+
+    @PostConstruct
+    private void initializePaths() {
+        // Initialize llama server path with platform-specific default
+        String defaultBinary = "llama-server";
+        String defaultLlamaPath = Paths.get("llama", defaultBinary).toAbsolutePath().normalize().toString();
+        llamaPath = PathUtils.resolvePath(llamaPathConfigured, defaultLlamaPath);
+
+        // Initialize model path
+        String defaultModelPath = Paths.get("llama", "models", "qwen2.5-7b-instruct-q3_k_m.gguf")
+                .toAbsolutePath().normalize().toString();
+        modelPath = PathUtils.resolvePath(modelPathConfigured, defaultModelPath);
+
+        log.info("[LLAMA] Initialized paths - server: {}, model: {}", llamaPath, modelPath);
+    }
+
     public void ensureAvailable() throws IOException {
         Path exePath = Paths.get(llamaPath);
         Path modelFilePath = Paths.get(modelPath);
 
         if (Files.exists(exePath)) {
             log.info("[LLAMA] Binary found at: {}", llamaPath);
-            if (!isWindows() && !Files.isExecutable(exePath)) {
+            if (!Files.isExecutable(exePath)) {
                 log.warn("[LLAMA] Setting executable permissions...");
                 exePath.toFile().setExecutable(true);
             }
@@ -254,21 +253,15 @@ public class LlamaService {
 
         String prompt = String.format(NORMALIZATION_PROMPT, text);
 
-        // Формируем JSON запрос в формате OpenAI API
-        String requestBody = String.format("""
-                {
-                    "model": "qwen2.5",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": %s
-                        }
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 1024,
-                    "stream": false
-                }
-                """, escapeJson(prompt));
+        ChatCompletionRequest request = ChatCompletionRequest.builder()
+                .model("qwen2.5")
+                .messages(List.of(new Message("user", prompt)))
+                .temperature(0.1)
+                .maxTokens(1024)
+                .stream(false)
+                .build();
+
+        String requestBody = objectMapper.writeValueAsString(request);
 
         log.info("[LLAMA] Отправка запроса нормализации для текста длиной {} символов, язык: {}",
                 text.length(), language);
@@ -289,18 +282,31 @@ public class LlamaService {
 
         int responseCode = conn.getResponseCode();
         if (responseCode != 200) {
-            String error = readStream(conn.getErrorStream());
-            throw new IOException("llama-server вернул ошибку " + responseCode + ": " + error);
+            try (InputStream errorStream = conn.getErrorStream()) {
+                String error = readStream(errorStream);
+                throw new IOException("llama-server вернул ошибку " + responseCode + ": " + error);
+            }
         }
 
-        String response = readStream(conn.getInputStream());
+        String response;
+        try (InputStream inputStream = conn.getInputStream()) {
+            response = readStream(inputStream);
+        }
         conn.disconnect();
 
         // Парсим ответ
-        String normalizedText = extractContentFromResponse(response);
+        ChatCompletionResponse completionResponse = objectMapper.readValue(response, ChatCompletionResponse.class);
 
+        if (completionResponse.getChoices() == null || completionResponse.getChoices().isEmpty() ||
+                completionResponse.getChoices().get(0).getMessage() == null) {
+            log.warn("[LLAMA] Empty response from server");
+            return "";
+        }
+
+        String normalizedText = completionResponse.getChoices().get(0).getMessage().getContent();
         log.info("[LLAMA] Нормализация завершена, результат: {} символов", normalizedText.length());
-        return normalizedText;
+
+        return normalizedText != null ? normalizedText.trim() : "";
     }
 
     /**
@@ -317,74 +323,6 @@ public class LlamaService {
             }
             return sb.toString();
         }
-    }
-
-    /**
-     * Экранирует строку для JSON
-     */
-    private String escapeJson(String text) {
-        return "\"" + text
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t")
-                + "\"";
-    }
-
-    /**
-     * Извлекает content из ответа OpenAI API
-     */
-    private String extractContentFromResponse(String response) {
-        // Простой парсинг JSON ответа
-        // Формат: {"choices":[{"message":{"content":"..."}}]}
-        try {
-            int contentStart = response.indexOf("\"content\":");
-            if (contentStart == -1) {
-                log.warn("[LLAMA] Не удалось найти 'content' в ответе: {}", response);
-                return "";
-            }
-
-            contentStart = response.indexOf("\"", contentStart + 10) + 1;
-            int contentEnd = findClosingQuote(response, contentStart);
-
-            if (contentEnd == -1) {
-                log.warn("[LLAMA] Не удалось найти закрывающую кавычку в ответе");
-                return "";
-            }
-
-            String content = response.substring(contentStart, contentEnd);
-            // Распарсить JSON escapes
-            content = content
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                    .replace("\\t", "\t")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-
-            return content.trim();
-        } catch (Exception e) {
-            log.error("[LLAMA] Ошибка парсинга ответа: {}", e.getMessage());
-            return "";
-        }
-    }
-
-    /**
-     * Находит закрывающую кавычку с учётом escape-последовательностей
-     */
-    private int findClosingQuote(String text, int startIndex) {
-        boolean escaped = false;
-        for (int i = startIndex; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                return i;
-            }
-        }
-        return -1;
     }
 
     @PreDestroy
@@ -412,5 +350,41 @@ public class LlamaService {
 
     public boolean isAvailable() {
         return Files.exists(Paths.get(llamaPath)) && Files.exists(Paths.get(modelPath));
+    }
+
+    // DTO Helper Classes
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class ChatCompletionRequest {
+        private String model;
+        private List<Message> messages;
+        private double temperature;
+        @JsonProperty("max_tokens")
+        private int maxTokens;
+        private boolean stream;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class Message {
+        private String role;
+        private String content;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class ChatCompletionResponse {
+        private List<Choice> choices;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class Choice {
+        private Message message;
     }
 }
